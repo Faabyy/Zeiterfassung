@@ -1,0 +1,494 @@
+/* ---------- Grundwerte ---------- */
+
+:root {
+  --color-primary: #1f5d99;
+  --color-primary-hover: #174a7a;
+  --color-primary-light: #e8f0fa;
+  --color-danger: #b00020;
+  --color-danger-light: #fdecee;
+  --color-warning: #7a4a00;
+  --color-warning-light: #fff4e0;
+  --color-success: #1d6b36;
+  --color-success-light: #e3f4e8;
+
+  --color-text: #222;
+  --color-muted: #666;
+  --color-border: #e2e5ea;
+  --color-border-strong: #c5cbd3;
+  --color-background: #f4f5f7;
+  --color-surface: #fff;
+  --color-surface-alt: #f8f9fb;
+
+  --radius: 8px;
+  --radius-large: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  font-size: 15px;
+  background: var(--color-background);
+  color: var(--color-text);
+}
+
+h1 {
+  margin: 0 0 20px;
+  font-size: 26px;
+}
+
+h2 {
+  margin: 0 0 16px;
+  font-size: 19px;
+}
+
+.muted {
+  color: var(--color-muted);
+}
+
+/* ---------- Seitenaufbau ---------- */
+
+.app {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+/* Oben Erfassen und Buchungen nebeneinander, darunter volle Breite. */
+.top-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  align-items: start;
+  margin-bottom: 20px;
+}
+
+.top-row .card {
+  margin-bottom: 0;
+}
+
+.card {
+  margin-bottom: 20px;
+  padding: 20px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-large);
+  background: var(--color-surface);
+}
+
+.card-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* ---------- Buttons ---------- */
+
+button {
+  padding: 9px 16px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius);
+  background: var(--color-primary);
+  color: white;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--color-primary-hover);
+  background: var(--color-primary-hover);
+}
+
+button:disabled,
+button:disabled:hover {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.secondary-button {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.secondary-button:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-alt);
+}
+
+.delete-button {
+  border-color: var(--color-danger);
+  background: var(--color-surface);
+  color: var(--color-danger);
+}
+
+.delete-button:hover {
+  border-color: var(--color-danger);
+  background: var(--color-danger-light);
+}
+
+.small-button {
+  padding: 5px 12px;
+  font-size: 14px;
+}
+
+.link-button,
+.link-button:hover {
+  justify-self: start;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+/* Unauffällige Nebenaktion, z. B. "Leeren" */
+.link-button.quiet {
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.link-button.quiet:hover {
+  color: var(--color-danger);
+}
+
+.form-actions,
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Umschalter "Stempeln" / "Zeitraum nachtragen" */
+.mode-switch {
+  display: flex;
+  justify-self: start;
+}
+
+.mode-switch button {
+  border-color: var(--color-border-strong);
+  border-radius: 0;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.mode-switch button:first-child {
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+
+.mode-switch button:last-child {
+  border-left: none;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.mode-switch button[aria-pressed='true'] {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: white;
+}
+
+.stamp-buttons {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.stamp-buttons button {
+  padding: 14px 8px;
+  font-weight: bold;
+}
+
+/* ---------- Formulare ---------- */
+
+form {
+  display: grid;
+  gap: 14px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  color: var(--color-muted);
+  font-size: 14px;
+}
+
+input,
+select {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
+input:focus,
+select:focus,
+button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.date-time-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.date-time-fields label {
+  flex: 1 1 110px;
+  min-width: 0;
+}
+
+/* Die Datumsauswahl braucht mehr Platz als die Uhrzeitfelder. */
+.date-time-fields label:first-child {
+  flex: 2 1 220px;
+}
+
+.field-note {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 14px;
+}
+
+/* ---------- Meldungen ---------- */
+
+.error {
+  margin: 0;
+  color: var(--color-danger);
+}
+
+.global-error,
+.warning {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+
+.global-error {
+  margin-bottom: 20px;
+  border: 1px solid var(--color-danger);
+  background: var(--color-danger-light);
+}
+
+.warning {
+  border: 1px solid #f0d9a8;
+  background: var(--color-warning-light);
+  color: var(--color-warning);
+}
+
+/* ---------- Listen (Buchungen, Historie) ---------- */
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.list-row {
+  display: grid;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 4px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.list-row:last-child {
+  border-bottom: none;
+}
+
+.booking-list {
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.booking-list .list-row {
+  grid-template-columns: auto 1fr auto;
+}
+
+.booking-time {
+  font-weight: bold;
+  font-variant-numeric: tabular-nums;
+}
+
+.change-list .list-row {
+  grid-template-columns: 170px 90px 1fr;
+  font-size: 14px;
+}
+
+/* ---------- Tagesübersicht ---------- */
+
+.summary-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.summary-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface-alt);
+}
+
+.summary-label,
+.summary-detail {
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.summary-value {
+  font-size: 22px;
+  font-weight: bold;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-badge {
+  align-self: flex-start;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.status-OUT {
+  background: #eceff3;
+  color: #555;
+}
+
+.status-WORKING {
+  background: var(--color-success-light);
+  color: var(--color-success);
+}
+
+.status-ON_BREAK {
+  background: var(--color-warning-light);
+  color: var(--color-warning);
+}
+
+.table-wrapper {
+  overflow-x: auto;
+  margin: 16px 0;
+}
+
+.day-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.day-table th,
+.day-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+  text-align: right;
+}
+
+.day-table th:first-child,
+.day-table td:first-child {
+  text-align: left;
+}
+
+.day-table thead th {
+  background: var(--color-surface-alt);
+  color: var(--color-muted);
+  font-weight: bold;
+}
+
+.day-table tbody tr.clickable {
+  cursor: pointer;
+}
+
+.day-table tbody tr:hover {
+  background: var(--color-surface-alt);
+}
+
+.day-table tbody tr.selected {
+  background: var(--color-primary-light);
+}
+
+.day-table .net {
+  font-weight: bold;
+}
+
+.day-table .open-day td {
+  color: var(--color-muted);
+}
+
+.day-table .open-day td:last-child {
+  text-align: left;
+  font-style: italic;
+}
+
+.day-table tfoot th,
+.day-table tfoot td {
+  border-top: 2px solid var(--color-text);
+  border-bottom: none;
+  font-weight: bold;
+}
+
+/* ---------- Dialog ---------- */
+
+.confirm-dialog {
+  max-width: 480px;
+  padding: 20px;
+  border: none;
+  border-radius: var(--radius-large);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 25%);
+}
+
+.confirm-dialog::backdrop {
+  background: rgb(0 0 0 / 40%);
+}
+
+.confirm-dialog p {
+  margin: 0 0 16px;
+}
+
+/* Im Dialog ist Löschen die Hauptaktion und daher gefüllt. */
+.confirm-dialog .delete-button {
+  background: var(--color-danger);
+  color: white;
+}
+
+/* ---------- Schmale Bildschirme ---------- */
+
+@media (max-width: 960px) {
+  .top-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .summary-tiles {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .change-list .list-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
+@media (max-width: 600px) {
+  .app {
+    padding: 16px;
+  }
+
+  .stamp-buttons {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
