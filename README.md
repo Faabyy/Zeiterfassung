@@ -32,3 +32,7 @@ Beim ersten Start legt das Skript die `.env` an und installiert die Pakete.
 ```bash
 ./dev.sh test
 ```
+
+---
+
+Co-Authored-By: Claude Code
