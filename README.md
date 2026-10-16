@@ -35,4 +35,4 @@ Beim ersten Start legt das Skript die `.env` an und installiert die Pakete.
 
 ---
 
-Co-Authored-By: Claude Code
+Co-Authored-By: Claude
