@@ -10,6 +10,8 @@
 | 0.2 | 2026-07-15 | Faabyy | Fachkonzept automatische Pausenberechnung ergänzt |
 | 0.3 | 2026-10-01 | Faabyy | Nach Markdown überführt, Umsetzungsstand nachgezogen, fehlende Kapitel ergänzt |
 | 0.4 | 2026-10-01 | Faabyy | Feiertagszuschläge, Änderungshistorie und Bedienoberfläche ergänzt |
+| 0.5 | 2026-10-26 | Faabyy | Stempeln und Nachtragen getrennt, keine Buchungen in der Zukunft |
+| 0.6 | 2026-10-26 | Faabyy | Anmeldung mit festen Benutzern, Buchungen je Benutzer |
 
 ### 1.2 Referenzierte Dokumente
 
@@ -63,21 +65,23 @@ Das Backend speichert die Buchungen und prüft alle Regeln. Das Frontend berechn
 
 ### 2.3 Organisatorische Einordnung
 
-Persönliches Lernprojekt im Rahmen der Ausbildung. Die Anwendung läuft nur lokal und wird von einer Person genutzt.
+Persönliches Lernprojekt im Rahmen der Ausbildung. Die Anwendung läuft nur lokal und kennt mehrere fest eingerichtete Benutzer.
 
 ## 3. Fachliche Beschreibung
 
 ### 3.1 Installation und Konfiguration
 
-Start mit `./dev.sh start` (siehe `README.md`). Die Konfiguration (Datenbankzugang, Ports) steht in der `.env`; eingecheckt ist nur die Vorlage `.env.example`.
+Start mit `./dev.sh start` (siehe `README.md`). Die Konfiguration (Datenbankzugang, Ports, Benutzer) steht in der `.env`; eingecheckt ist nur die Vorlage `.env.example`.
 
 ### 3.2 Autorisierung
 
-Keine Rollen, alle Funktionen stehen uneingeschränkt zur Verfügung.
+Keine Rollen. Jeder angemeldete Benutzer sieht und bearbeitet nur seine eigenen Buchungen und seine eigene Änderungshistorie. Die Regeln (Reihenfolge, Mindestruhezeit) gelten je Benutzer.
 
 ### 3.3 Authentifizierung
 
-Keine Anmeldung.
+Anmeldung mit Benutzername und Passwort, eine Registrierung gibt es nicht. Die Benutzer stehen in der `.env` unter `APP_USERS` (`name:passwort`, mit Komma getrennt) und werden beim Start des Backends übernommen. Wer dort entfernt wird, kann sich nicht mehr anmelden; seine Buchungen bleiben erhalten. Buchungen aus der Zeit vor der Anmeldung erhält der erste Benutzer.
+
+Passwörter werden nur als Hash (scrypt mit Salt) gespeichert. Nach der Anmeldung erhält der Browser ein Sitzungs-Cookie (HttpOnly), das bis zum Abmelden gilt.
 
 ### 3.4 Datensicherung
 
@@ -179,19 +183,19 @@ Zwischen "Gehen" und dem nächsten "Kommen" müssen mindestens 11 Stunden liegen
 ### 3.14 Fachlogik: Korrekturmöglichkeiten
 
 - Bearbeiten: Typ und Zeitpunkt einer Buchung ändern.
-- Zeitraum nachtragen: Pause oder Arbeitszeit mit Datum, Beginn und Ende auf einmal erfassen, z. B. eine vergessene Pause. Liegt das Ende vor dem Beginn, endet der Zeitraum am Folgetag.
+- Nachtragen: eine einzelne Buchung mit Datum und Uhrzeit oder einen Zeitraum (Pause oder Arbeitszeit) mit Datum, Beginn und Ende erfassen, z. B. eine vergessene Pause. Liegt das Ende vor dem Beginn, endet der Zeitraum am Folgetag.
 - Löschen: Damit keine halben Schichten oder Pausen übrig bleiben, wird beim Löschen von "Kommen" oder "Gehen" die ganze Schicht gelöscht, beim Löschen einer Pausenbuchung die ganze Pause. Vorher erscheint eine Bestätigung.
 
-Auch Korrekturen werden nach den Regeln aus 3.10 und 3.13 geprüft.
+Auch Korrekturen werden nach den Regeln aus 3.10 und 3.13 geprüft. Nachgetragene und korrigierte Zeitpunkte dürfen nicht in der Zukunft liegen. Beim Stempeln setzt der Server den Zeitpunkt, daher ist die Vergangenheit nur über Nachtragen erreichbar.
 
-Jede Anlage, Korrektur und Löschung wird mit altem und neuem Wert protokolliert. Abgelehnte Änderungen werden nicht protokolliert. Die Historie kann nach Rückfrage geleert werden; die Buchungen bleiben dabei erhalten.
+Jede Anlage, Korrektur und Löschung wird mit altem und neuem Wert protokolliert, nachgetragene Buchungen sind als "Nachgetragen" gekennzeichnet. Abgelehnte Änderungen werden nicht protokolliert. Die Historie kann nach Rückfrage geleert werden; die Buchungen bleiben dabei erhalten.
 
 ### 3.15 Bedienoberfläche
 
 | Bereich | Inhalt |
 |---|---|
-| Neue Buchung | Stempeln nach dem Stempeluhr-Prinzip: Ein Klick auf Kommen, Pause Start, Pause Ende oder Gehen bucht mit der aktuellen Uhrzeit. Angeboten werden nur die im aktuellen Zustand erlaubten Buchungen. Für Nachträge kann eine andere Zeit eingegeben werden, außerdem lassen sich ganze Zeiträume nachtragen (3.14). |
-| Heutige Buchungen | Buchungen des heutigen Arbeitstages mit Bearbeiten und Löschen. Ein Klick auf einen Tag in der Tagesübersicht zeigt stattdessen dessen Buchungen. |
+| Neue Buchung | Stempeln nach dem Stempeluhr-Prinzip: Ein Klick auf Kommen, Pause Start, Pause Ende oder Gehen bucht mit der aktuellen Uhrzeit des Servers. Angeboten werden nur die im aktuellen Zustand erlaubten Buchungen. Einzelbuchungen und Zeiträume mit eigener Zeit werden getrennt davon über "Nachtragen" erfasst (3.14). |
+| Heutige Buchungen | Buchungen des heutigen Arbeitstages mit Bearbeiten und Löschen, nachgetragene Buchungen gekennzeichnet. Ein Klick auf einen Tag in der Tagesübersicht zeigt stattdessen dessen Buchungen. |
 | Tagesübersicht | Status, Netto- und Zuschlagssumme sowie eine Tabelle mit Brutto, Pause, Pausenabzug, Netto und Zuschlägen je Arbeitstag. Hinweise zu Pausen erscheinen darunter. |
 | Änderungshistorie | Alle Anlagen, Korrekturen und Löschungen, neueste zuerst. |
 
@@ -209,7 +213,9 @@ Tabelle `bookings`:
 |---|---|
 | `id` | Fortlaufende Nummer |
 | `type` | Buchungstyp |
-| `timestamp` | Zeitpunkt der Buchung (eindeutig) |
+| `timestamp` | Zeitpunkt der Buchung (je Benutzer eindeutig) |
+| `source` | Herkunft: STAMP (gestempelt) oder BACKFILL (nachgetragen) |
+| `user_id` | Benutzer, dem die Buchung gehört |
 | `created_at`, `updated_at` | Zeitpunkt der Anlage und der letzten Änderung |
 
 Tabelle `booking_changes` (Änderungshistorie):
@@ -220,7 +226,11 @@ Tabelle `booking_changes` (Änderungshistorie):
 | `action` | Art der Änderung: CREATE, UPDATE oder DELETE |
 | `old_type`, `old_timestamp` | Werte vor der Änderung |
 | `new_type`, `new_timestamp` | Werte nach der Änderung |
+| `source` | Herkunft der Buchung (STAMP oder BACKFILL) |
+| `user_id` | Benutzer, dem die Buchung gehört |
 | `changed_at` | Zeitpunkt der Änderung |
+
+Tabelle `users`: `username` (eindeutig) und `password_hash` (leer bei gesperrten Benutzern). Tabelle `sessions`: Sitzungs-Token und Benutzer.
 
 Arbeitszeiten und Zuschläge werden nicht gespeichert, sondern bei jeder Anzeige berechnet.
 

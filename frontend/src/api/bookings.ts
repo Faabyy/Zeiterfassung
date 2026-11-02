@@ -1,6 +1,7 @@
 import type {
   Booking,
   BookingChange,
+  BookingSource,
   BookingType,
   NewBooking,
 } from '../types/booking'
@@ -8,6 +9,9 @@ import type {
 const BASE_URL = '/api/bookings'
 
 export class ApiError extends Error {}
+
+// Nicht (mehr) angemeldet, z. B. nach dem Abmelden in einem anderen Tab.
+export class UnauthorizedError extends ApiError {}
 
 const BACKEND_UNREACHABLE = 'Das Backend ist nicht erreichbar. Läuft es?'
 
@@ -55,17 +59,49 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     throw new ApiError(BACKEND_UNREACHABLE)
   }
 
+  if (response.status === 401) {
+    throw new UnauthorizedError(await readErrorMessage(response))
+  }
+
   if (!response.ok) {
     throw new ApiError(await readErrorMessage(response))
   }
 
-  return response.json()
+  return response.status === 204 ? (undefined as T) : response.json()
+}
+
+type User = { username: string }
+
+// Das Backend setzt bei Erfolg ein Sitzungs-Cookie, das der Browser bei
+// allen weiteren Anfragen mitschickt.
+export function login(username: string, password: string): Promise<User> {
+  return request('/api/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  })
+}
+
+export function logout(): Promise<void> {
+  return request('/api/logout', { method: 'POST' })
+}
+
+export function fetchCurrentUser(): Promise<User> {
+  return request('/api/me')
 }
 
 export function fetchBookings(): Promise<Booking[]> {
   return request(BASE_URL)
 }
 
+// Stempeln: Den Zeitpunkt setzt das Backend (aktuelle Uhrzeit).
+export function stampBooking(type: BookingType): Promise<Booking> {
+  return request(`${BASE_URL}/stamp`, {
+    method: 'POST',
+    body: JSON.stringify({ type }),
+  })
+}
+
+// Nachtragen mit eigenem Zeitpunkt.
 export function createBookings(newBookings: NewBooking[]): Promise<Booking[]> {
   return request(BASE_URL, {
     method: 'POST',
@@ -97,6 +133,7 @@ type BookingChangeResponse = {
   old_timestamp: string | null
   new_type: BookingType | null
   new_timestamp: string | null
+  source: BookingSource | null
   changed_at: string
 }
 
@@ -112,6 +149,7 @@ export async function fetchBookingChanges(): Promise<BookingChange[]> {
     oldTimestamp: change.old_timestamp,
     newType: change.new_type,
     newTimestamp: change.new_timestamp,
+    source: change.source,
     changedAt: change.changed_at,
   }))
 }

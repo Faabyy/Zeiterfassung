@@ -13,6 +13,12 @@ const ACTION_LABELS: Record<BookingChange['action'], string> = {
   DELETE: 'Gelöscht',
 }
 
+function actionLabel(change: BookingChange) {
+  return change.action === 'CREATE' && change.source === 'BACKFILL'
+    ? 'Nachgetragen'
+    : ACTION_LABELS[change.action]
+}
+
 function describeBooking(type: BookingType | null, timestamp: string | null) {
   return type && timestamp
     ? `${BOOKING_TYPE_LABELS[type]} ${formatTimestamp(timestamp)}`
@@ -41,7 +47,7 @@ function ChangeHistory({ changes, onClear }: ChangeHistoryProps) {
               <span className="muted">
                 {new Date(change.changedAt).toLocaleString('de-DE')}
               </span>
-              <strong>{ACTION_LABELS[change.action]}</strong>
+              <strong>{actionLabel(change)}</strong>
               <span>
                 {change.action === 'UPDATE'
                   ? `${describeBooking(change.oldType, change.oldTimestamp)} → ` +

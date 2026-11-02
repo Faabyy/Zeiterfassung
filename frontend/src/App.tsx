@@ -4,7 +4,9 @@ import BookingList from './components/BookingList'
 import ChangeHistory from './components/ChangeHistory'
 import ConfirmDialog from './components/ConfirmDialog'
 import DaySummary from './components/DaySummary'
+import LoginForm from './components/LoginForm'
 import * as bookingApi from './api/bookings'
+import { UnauthorizedError } from './api/bookings'
 import { BOOKING_TYPE_LABELS } from './types/booking'
 import type {
   Booking,
@@ -45,6 +47,8 @@ function describeDeletion(bookings: Booking[], id: number): string {
 }
 
 function App() {
+  // null: nicht angemeldet. Beim Start wird die Sitzung erst geprüft.
+  const [username, setUsername] = useState<string | null>(null)
   const [bookings, setBookings] = useState<Booking[]>([])
   const [changes, setChanges] = useState<BookingChange[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -61,6 +65,26 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(today)
   const isToday = selectedDate === today
 
+  function resetSession() {
+    setUsername(null)
+    setBookings([])
+    setChanges([])
+    setBookingToEdit(null)
+    setBookingIdToDelete(null)
+    setIsClearingHistory(false)
+  }
+
+  // Ist die Sitzung abgelaufen, geht es zurück zur Anmeldung.
+  function showError(error: unknown, prefix = '') {
+    if (error instanceof UnauthorizedError) {
+      resetSession()
+      setGlobalError('Die Sitzung ist abgelaufen. Bitte erneut anmelden.')
+      return
+    }
+
+    setGlobalError(prefix + (error as Error).message)
+  }
+
   // Nach jeder Änderung wird die Liste neu geladen, damit immer der
   // Stand der Datenbank angezeigt wird.
   async function reloadBookings() {
@@ -68,15 +92,59 @@ function App() {
       setBookings(await bookingApi.fetchBookings())
       setChanges(await bookingApi.fetchBookingChanges())
     } catch (error) {
-      setGlobalError((error as Error).message)
+      showError(error)
     } finally {
       setIsLoading(false)
     }
   }
 
+  // Beim Start prüfen, ob noch eine Sitzung besteht.
   useEffect(() => {
-    reloadBookings()
+    async function restoreSession() {
+      try {
+        const user = await bookingApi.fetchCurrentUser()
+        setUsername(user.username)
+      } catch (error) {
+        if (!(error instanceof UnauthorizedError)) {
+          setGlobalError((error as Error).message)
+        }
+
+        setIsLoading(false)
+        return
+      }
+
+      await reloadBookings()
+    }
+
+    restoreSession()
   }, [])
+
+  // Liefert bei falschen Zugangsdaten die Fehlermeldung für das Formular.
+  async function login(name: string, password: string) {
+    try {
+      const user = await bookingApi.login(name, password)
+      setUsername(user.username)
+    } catch (error) {
+      return (error as Error).message
+    }
+
+    setGlobalError('')
+    setSelectedDate(today)
+    await reloadBookings()
+    return null
+  }
+
+  async function logout() {
+    try {
+      await bookingApi.logout()
+    } catch (error) {
+      showError(error)
+      return
+    }
+
+    resetSession()
+    setGlobalError('')
+  }
 
   // Fehler stehen oben auf der Seite; dorthin scrollen, damit sie auch
   // nach einem Klick weiter unten (z. B. in der Liste) sichtbar sind.
@@ -86,19 +154,29 @@ function App() {
     }
   }, [globalError])
 
-  // Mehrere Buchungen (z. B. PAUSE_START + PAUSE_ENDE) werden gemeinsam
-  // geprüft, damit sich auch Paare in abgeschlossene Tage nachtragen lassen.
-  async function addBookings(newBookings: NewBooking[]): Promise<boolean> {
+  // Führt eine Anlage aus und lädt danach neu; Fehler landen oben auf
+  // der Seite. Liefert, ob die Anlage geklappt hat.
+  async function runAndReload(action: () => Promise<unknown>) {
     try {
-      await bookingApi.createBookings(newBookings)
+      await action()
     } catch (error) {
-      setGlobalError((error as Error).message)
+      showError(error)
       return false
     }
 
     setGlobalError('')
     await reloadBookings()
     return true
+  }
+
+  async function stampBooking(type: BookingType) {
+    await runAndReload(() => bookingApi.stampBooking(type))
+  }
+
+  // Mehrere Buchungen (z. B. PAUSE_START + PAUSE_ENDE) werden gemeinsam
+  // geprüft, damit sich auch Paare in abgeschlossene Tage nachtragen lassen.
+  function backfillBookings(newBookings: NewBooking[]): Promise<boolean> {
+    return runAndReload(() => bookingApi.createBookings(newBookings))
   }
 
   function startEditing(booking: Booking) {
@@ -119,9 +197,7 @@ function App() {
     try {
       await bookingApi.updateBooking(id, type, timestamp)
     } catch (error) {
-      setGlobalError(
-        `Die Korrektur konnte nicht gespeichert werden: ${(error as Error).message}`,
-      )
+      showError(error, 'Die Korrektur konnte nicht gespeichert werden: ')
       return
     }
 
@@ -142,9 +218,7 @@ function App() {
     try {
       deletedBookings = await bookingApi.deleteBooking(id)
     } catch (error) {
-      setGlobalError(
-        `Die Buchung wurde nicht gelöscht: ${(error as Error).message}`,
-      )
+      showError(error, 'Die Buchung wurde nicht gelöscht: ')
       return
     }
 
@@ -162,9 +236,7 @@ function App() {
     try {
       await bookingApi.clearBookingChanges()
     } catch (error) {
-      setGlobalError(
-        `Die Historie wurde nicht geleert: ${(error as Error).message}`,
-      )
+      showError(error, 'Die Historie wurde nicht geleert: ')
       return
     }
 
@@ -174,7 +246,23 @@ function App() {
 
   return (
     <div className="app">
-      <h1>Zeiterfassung</h1>
+      <header className="app-header">
+        <h1>Zeiterfassung</h1>
+
+        {username && (
+          <div className="user-info">
+            <span className="muted">Angemeldet als</span>{' '}
+            <strong>{username}</strong>
+            <button
+              type="button"
+              className="small-button secondary-button"
+              onClick={logout}
+            >
+              Abmelden
+            </button>
+          </div>
+        )}
+      </header>
 
       {globalError && (
         <p ref={errorRef} className="error global-error" role="alert">
@@ -184,12 +272,15 @@ function App() {
 
       {isLoading ? (
         <p>Buchungen werden geladen …</p>
+      ) : username === null ? (
+        <LoginForm onLogin={login} />
       ) : (
         <>
           <div className="top-row">
             <BookingForm
               bookings={bookings}
-              onAddBookings={addBookings}
+              onStamp={stampBooking}
+              onBackfill={backfillBookings}
               bookingToEdit={bookingToEdit}
               onUpdateBooking={updateBooking}
               onCancelEdit={cancelEditing}

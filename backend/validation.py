@@ -27,6 +27,21 @@ def format_timestamp(timestamp: datetime) -> str:
     return f'{weekday}, {timestamp:%d.%m.}, {timestamp:%H:%M}'
 
 
+# Liefert eine Meldung, wenn einer der Zeitpunkte nach "now" liegt.
+def validate_not_in_future(
+    timestamps: list[datetime],
+    now: datetime,
+) -> str | None:
+    for timestamp in sorted(timestamps):
+        if timestamp > now:
+            return (
+                f'Der Zeitpunkt {format_timestamp(timestamp)} liegt in der Zukunft. '
+                'Buchungen sind nur bis zur aktuellen Uhrzeit möglich.'
+            )
+
+    return None
+
+
 # Erwartet eine chronologisch sortierte Buchungsfolge und liefert die erste
 # Regelverletzung als Meldung oder None, wenn alles gültig ist.
 def validate_booking_list(

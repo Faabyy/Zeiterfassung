@@ -71,13 +71,12 @@ function DaySummary({
         </div>
 
         <div className="summary-tile">
-          <span className="summary-label">Netto gesamt</span>
-          <span className="summary-value">{formatHours(sum('netMinutes'))}</span>
-        </div>
-
-        <div className="summary-tile">
-          <span className="summary-label">Zuschläge gesamt</span>
+          <span className="summary-label">Netto inkl. Zuschläge</span>
           <span className="summary-value">
+            {formatHours(sum('netMinutes') + sum('surchargeMinutes'))}
+          </span>
+          <span className="summary-detail">
+            Netto {formatHours(sum('netMinutes'))} + Zuschläge{' '}
             {formatHours(sum('surchargeMinutes'))}
           </span>
         </div>
@@ -92,16 +91,27 @@ function DaySummary({
         <div className="table-wrapper">
           <table className="day-table">
             <thead>
+              <tr className="group-row">
+                <th></th>
+                <th colSpan={4}>Arbeitszeit</th>
+                <th colSpan={3} className="group-start">
+                  Davon an (Netto)
+                </th>
+                <th colSpan={2} className="group-start">
+                  Mit Zuschlägen
+                </th>
+              </tr>
               <tr>
                 <th>Arbeitstag</th>
                 <th>Brutto</th>
                 <th>Pause</th>
                 <th>Pausenabzug</th>
                 <th>Netto</th>
-                <th>Samstag</th>
+                <th className="group-start">Samstag</th>
                 <th>Sonntag</th>
                 <th>Feiertag</th>
-                <th>Zuschlag</th>
+                <th className="group-start">Zuschlag</th>
+                <th>Gesamt</th>
               </tr>
             </thead>
             <tbody>
@@ -116,7 +126,7 @@ function DaySummary({
                       {formatDateKey(day.date)}{' '}
                       <span className="status-badge status-WORKING">läuft</span>
                     </td>
-                    <td colSpan={8}>Wird nach dem Gehen berechnet</td>
+                    <td colSpan={9}>Wird nach dem Gehen berechnet</td>
                   </tr>
                 ) : (
                   <tr
@@ -129,10 +139,13 @@ function DaySummary({
                     <td>{formatHours(day.breakMinutes)}</td>
                     <td>{formatHours(day.automaticBreakMinutes)}</td>
                     <td className="net">{formatHours(day.netMinutes)}</td>
-                    <td>{formatHours(day.saturdayMinutes)}</td>
+                    <td className="group-start">{formatHours(day.saturdayMinutes)}</td>
                     <td>{formatHours(day.sundayMinutes)}</td>
                     <td>{formatHours(day.holidayMinutes)}</td>
-                    <td>{formatHours(day.surchargeMinutes)}</td>
+                    <td className="group-start">{formatHours(day.surchargeMinutes)}</td>
+                    <td className="net">
+                      {formatHours(day.netMinutes + day.surchargeMinutes)}
+                    </td>
                   </tr>
                 ),
               )}
@@ -141,11 +154,12 @@ function DaySummary({
               <tr>
                 <th>Summe</th>
                 <td colSpan={3}></td>
-                <td>{formatHours(sum('netMinutes'))}</td>
-                <td>{formatHours(sum('saturdayMinutes'))}</td>
+                <td className="net">{formatHours(sum('netMinutes'))}</td>
+                <td className="group-start">{formatHours(sum('saturdayMinutes'))}</td>
                 <td>{formatHours(sum('sundayMinutes'))}</td>
                 <td>{formatHours(sum('holidayMinutes'))}</td>
-                <td>{formatHours(sum('surchargeMinutes'))}</td>
+                <td className="group-start">{formatHours(sum('surchargeMinutes'))}</td>
+                <td>{formatHours(sum('netMinutes') + sum('surchargeMinutes'))}</td>
               </tr>
             </tfoot>
           </table>

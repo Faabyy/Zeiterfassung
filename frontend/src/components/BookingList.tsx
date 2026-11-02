@@ -48,7 +48,12 @@ function BookingList({
                   )}
                 </span>
 
-                <span>{BOOKING_TYPE_LABELS[booking.type]}</span>
+                <span>
+                  {BOOKING_TYPE_LABELS[booking.type]}
+                  {booking.source === 'BACKFILL' && (
+                    <span className="muted"> (nachgetragen)</span>
+                  )}
+                </span>
 
                 <span className="row-actions">
                   <button

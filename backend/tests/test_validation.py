@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from validation import BookingEntry, validate_booking_list
+from validation import BookingEntry, validate_booking_list, validate_not_in_future
 
 
 def entry(booking_type: str, timestamp: str) -> BookingEntry:
@@ -89,3 +89,20 @@ def test_rest_period_exactly_eleven_hours():
     ]
 
     assert validate_booking_list(bookings, True) is None
+
+
+def test_timestamps_up_to_now_are_allowed():
+    now = datetime.fromisoformat('2026-07-18T12:00')
+    timestamps = [datetime.fromisoformat('2026-07-18T08:00'), now]
+
+    assert validate_not_in_future(timestamps, now) is None
+
+
+def test_timestamp_in_future_is_rejected():
+    now = datetime.fromisoformat('2026-07-18T12:00')
+    timestamps = [datetime.fromisoformat('2026-07-18T12:01')]
+
+    assert validate_not_in_future(timestamps, now) == (
+        'Der Zeitpunkt Sa., 18.07., 12:01 liegt in der Zukunft. '
+        'Buchungen sind nur bis zur aktuellen Uhrzeit möglich.'
+    )

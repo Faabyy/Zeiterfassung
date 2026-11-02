@@ -8,6 +8,7 @@ function bookingsOf(...entries: Array<[BookingType, string]>): Booking[] {
     id: index + 1,
     type,
     timestamp,
+    source: 'STAMP',
   }))
 }
 

@@ -1,3 +1,9 @@
+from datetime import datetime
+
+import pytest
+
+import app as app_module
+
 URL = '/api/bookings'
 
 DAY_WITH_PAUSE = [
@@ -85,7 +91,12 @@ def test_update_corrects_booking(client):
     response = client.put(f'{URL}/4', json={'type': 'GEHEN', 'timestamp': '2026-07-18T17:00'})
 
     assert response.status_code == 200
-    assert response.json() == {'id': 4, 'type': 'GEHEN', 'timestamp': '2026-07-18T17:00'}
+    assert response.json() == {
+        'id': 4,
+        'type': 'GEHEN',
+        'timestamp': '2026-07-18T17:00',
+        'source': 'BACKFILL',
+    }
     assert stored(client)[-1] == ('GEHEN', '2026-07-18T17:00')
 
 
@@ -96,6 +107,16 @@ def test_invalid_update_is_rejected_and_nothing_changes(client):
 
     assert response.status_code == 400
     assert response.json()['detail'] == 'Während einer laufenden Pause ist nur „Pause Ende“ erlaubt.'
+    assert stored(client)[-1] == ('GEHEN', '2026-07-18T16:30')
+
+
+def test_update_into_future_is_rejected(client, fixed_now):
+    create(client, *DAY_WITH_PAUSE)
+
+    response = client.put(f'{URL}/4', json={'type': 'GEHEN', 'timestamp': '2026-07-20T12:00'})
+
+    assert response.status_code == 400
+    assert 'liegt in der Zukunft' in response.json()['detail']
     assert stored(client)[-1] == ('GEHEN', '2026-07-18T16:30')
 
 
@@ -204,3 +225,81 @@ def test_history_can_be_cleared(client):
     assert response.json() == {'deleted': 4}
     assert changes(client) == []
     assert len(stored(client)) == 4
+
+
+# Legt die Serverzeit für Stempeln und die Zukunftsprüfung fest.
+@pytest.fixture
+def fixed_now(monkeypatch):
+    now = datetime(2026, 7, 20, 9, 15)
+    monkeypatch.setattr(app_module, 'current_minute', lambda: now)
+    return now
+
+
+def stamp(client, booking_type):
+    return client.post(f'{URL}/stamp', json={'type': booking_type})
+
+
+def test_stamp_uses_server_time(client, fixed_now):
+    response = stamp(client, 'KOMMEN')
+
+    assert response.status_code == 201
+    assert response.json() == {
+        'id': 1,
+        'type': 'KOMMEN',
+        'timestamp': '2026-07-20T09:15',
+        'source': 'STAMP',
+    }
+
+
+def test_stamp_ignores_client_timestamp(client, fixed_now):
+    response = client.post(
+        f'{URL}/stamp',
+        json={'type': 'KOMMEN', 'timestamp': '2026-07-01T08:00'},
+    )
+
+    assert response.status_code == 201
+    assert stored(client) == [('KOMMEN', '2026-07-20T09:15')]
+
+
+def test_stamp_checks_booking_rules(client, fixed_now):
+    response = stamp(client, 'GEHEN')
+
+    assert response.status_code == 400
+    assert 'nur „Kommen“' in response.json()['detail']
+    assert stored(client) == []
+
+
+def test_backfill_up_to_now_is_allowed(client, fixed_now):
+    created = create(client, {'type': 'KOMMEN', 'timestamp': '2026-07-20T09:15'})
+
+    assert created[0]['source'] == 'BACKFILL'
+
+
+def test_backfill_in_future_is_rejected_and_nothing_is_stored(client, fixed_now):
+    response = client.post(URL, json=[
+        {'type': 'KOMMEN', 'timestamp': '2026-07-20T08:00'},
+        {'type': 'GEHEN', 'timestamp': '2026-07-20T09:16'},
+    ])
+
+    assert response.status_code == 400
+    assert response.json()['detail'] == (
+        'Der Zeitpunkt Mo., 20.07., 09:16 liegt in der Zukunft. '
+        'Buchungen sind nur bis zur aktuellen Uhrzeit möglich.'
+    )
+    assert stored(client) == []
+
+
+def test_history_records_source(client, fixed_now):
+    create(client, {'type': 'KOMMEN', 'timestamp': '2026-07-20T08:00'})
+    stamp(client, 'GEHEN')
+    client.delete(f'{URL}/1')
+
+    assert [
+        (change['action'], change['new_type'] or change['old_type'], change['source'])
+        for change in client.get('/api/booking-changes').json()
+    ] == [
+        ('DELETE', 'GEHEN', 'STAMP'),
+        ('DELETE', 'KOMMEN', 'BACKFILL'),
+        ('CREATE', 'GEHEN', 'STAMP'),
+        ('CREATE', 'KOMMEN', 'BACKFILL'),
+    ]

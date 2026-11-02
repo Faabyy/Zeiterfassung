@@ -14,8 +14,12 @@ import {
 } from '../utils/timeUtils'
 import { DateSelect, TimeInput } from './DateTimeInputs'
 
-type FormMode = 'STAMP' | 'PERIOD'
+type FormMode = 'STAMP' | 'BACKFILL'
 type PeriodType = 'WORK' | 'BREAK'
+
+// Nachgetragen wird entweder ein Zeitraum (zwei Buchungen) oder eine
+// einzelne Buchung.
+type BackfillType = PeriodType | BookingType
 
 const BOOKING_TYPES = Object.entries(BOOKING_TYPE_LABELS) as Array<
   [BookingType, string]
@@ -28,9 +32,14 @@ const PERIOD_BOOKING_TYPES: Record<PeriodType, [BookingType, BookingType]> = {
   BREAK: ['PAUSE_START', 'PAUSE_ENDE'],
 }
 
+function isPeriodType(type: BackfillType): type is PeriodType {
+  return type in PERIOD_BOOKING_TYPES
+}
+
 type BookingFormProps = {
   bookings: Booking[]
-  onAddBookings: (newBookings: NewBooking[]) => Promise<boolean>
+  onStamp: (type: BookingType) => Promise<void>
+  onBackfill: (newBookings: NewBooking[]) => Promise<boolean>
   bookingToEdit: Booking | null
   onUpdateBooking: (
     id: number,
@@ -40,13 +49,14 @@ type BookingFormProps = {
   onCancelEdit: () => void
 }
 
-function now() {
-  return splitTimestamp(toLocalTimestamp(new Date()))
+function today() {
+  return toLocalTimestamp(new Date()).slice(0, 10)
 }
 
 function BookingForm({
   bookings,
-  onAddBookings,
+  onStamp,
+  onBackfill,
   bookingToEdit,
   onUpdateBooking,
   onCancelEdit,
@@ -55,19 +65,16 @@ function BookingForm({
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState('')
 
-  // Stempeln: ohne eigene Zeit wird die aktuelle Uhrzeit verwendet.
-  const [useCustomTime, setUseCustomTime] = useState(false)
+  // Korrektur
+  const [editType, setEditType] = useState<BookingType>('KOMMEN')
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
 
-  // Korrektur
-  const [editType, setEditType] = useState<BookingType>('KOMMEN')
-
-  // Zeitraum nachtragen
-  const [periodType, setPeriodType] = useState<PeriodType>('BREAK')
-  const [periodDate, setPeriodDate] = useState('')
-  const [periodStart, setPeriodStart] = useState('')
-  const [periodEnd, setPeriodEnd] = useState('')
+  // Nachtragen
+  const [backfillType, setBackfillType] = useState<BackfillType>('BREAK')
+  const [backfillDate, setBackfillDate] = useState('')
+  const [backfillStart, setBackfillStart] = useState('')
+  const [backfillEnd, setBackfillEnd] = useState('')
 
   useEffect(() => {
     setError('')
@@ -80,30 +87,17 @@ function BookingForm({
     }
   }, [bookingToEdit])
 
-  // Mit aktueller Uhrzeit sind nur die im Status erlaubten Buchungen
-  // möglich. Bei einer eigenen Zeit prüft das Backend die Reihenfolge.
-  const allowedTypes = useCustomTime
-    ? BOOKING_TYPES.map(([type]) => type)
-    : ALLOWED_NEXT_TYPES[getCurrentBookingStatus(bookings)]
+  // Gestempelt wird immer zur aktuellen Uhrzeit, daher sind nur die im
+  // aktuellen Status erlaubten Buchungen möglich.
+  const allowedTypes = ALLOWED_NEXT_TYPES[getCurrentBookingStatus(bookings)]
 
   function changeMode(newMode: FormMode) {
     setMode(newMode)
     setError('')
 
-    if (newMode === 'PERIOD' && periodDate === '') {
-      setPeriodDate(now().date)
+    if (newMode === 'BACKFILL' && backfillDate === '') {
+      setBackfillDate(today())
     }
-  }
-
-  function toggleCustomTime() {
-    if (!useCustomTime) {
-      const current = now()
-      setDate(current.date)
-      setTime(current.time)
-    }
-
-    setUseCustomTime(!useCustomTime)
-    setError('')
   }
 
   async function save(action: () => Promise<unknown>) {
@@ -117,53 +111,59 @@ function BookingForm({
   }
 
   function stamp(type: BookingType) {
-    const customTime = parseTimeInput(time)
-
-    if (useCustomTime && customTime === null) {
-      setError(INVALID_TIME_MESSAGE)
-      return
-    }
-
-    const timestamp = useCustomTime
-      ? `${date}T${customTime}`
-      : toLocalTimestamp(new Date())
-
     setError('')
-    save(() => onAddBookings([{ type, timestamp }]))
+    save(() => onStamp(type))
   }
 
-  // Liegt das Ende vor dem Beginn, endet der Zeitraum am Folgetag.
-  const startTime = parseTimeInput(periodStart)
-  const endTime = parseTimeInput(periodEnd)
+  // Bei einem Zeitraum endet er am Folgetag, wenn das Ende vor dem Beginn liegt.
+  const isPeriod = isPeriodType(backfillType)
+  const startTime = parseTimeInput(backfillStart)
+  const endTime = parseTimeInput(backfillEnd)
   const periodEndsNextDay =
-    startTime !== null && endTime !== null && endTime < startTime
+    isPeriod && startTime !== null && endTime !== null && endTime < startTime
 
-  function submitPeriod() {
-    if (startTime === null || endTime === null) {
+  function buildBackfillBookings(): NewBooking[] | null {
+    if (startTime === null || (isPeriod && endTime === null)) {
       setError(INVALID_TIME_MESSAGE)
-      return
+      return null
+    }
+
+    if (!isPeriodType(backfillType)) {
+      return [
+        { type: backfillType, timestamp: `${backfillDate}T${startTime}` },
+      ]
     }
 
     if (startTime === endTime) {
       setError('Beginn und Ende dürfen nicht gleich sein.')
-      return
+      return null
     }
 
     const endDate = periodEndsNextDay
-      ? addDaysToDateKey(periodDate, 1)
-      : periodDate
-    const [startType, endType] = PERIOD_BOOKING_TYPES[periodType]
+      ? addDaysToDateKey(backfillDate, 1)
+      : backfillDate
+    const [startType, endType] = PERIOD_BOOKING_TYPES[backfillType]
+
+    return [
+      { type: startType, timestamp: `${backfillDate}T${startTime}` },
+      { type: endType, timestamp: `${endDate}T${endTime}` },
+    ]
+  }
+
+  function submitBackfill() {
+    const newBookings = buildBackfillBookings()
+
+    if (newBookings === null) {
+      return
+    }
 
     setError('')
     save(async () => {
-      const added = await onAddBookings([
-        { type: startType, timestamp: `${periodDate}T${startTime}` },
-        { type: endType, timestamp: `${endDate}T${endTime}` },
-      ])
+      const added = await onBackfill(newBookings)
 
       if (added) {
-        setPeriodStart('')
-        setPeriodEnd('')
+        setBackfillStart('')
+        setBackfillEnd('')
       }
     })
   }
@@ -191,17 +191,10 @@ function BookingForm({
 
     if (bookingToEdit) {
       submitEdit()
-    } else if (mode === 'PERIOD') {
-      submitPeriod()
+    } else if (mode === 'BACKFILL') {
+      submitBackfill()
     }
   }
-
-  const dateTimeFields = (
-    <div className="date-time-fields">
-      <DateSelect label="Datum" value={date} onChange={setDate} />
-      <TimeInput label="Uhrzeit" value={time} onChange={setTime} />
-    </div>
-  )
 
   if (bookingToEdit) {
     return (
@@ -224,7 +217,10 @@ function BookingForm({
           </select>
         </label>
 
-        {dateTimeFields}
+        <div className="date-time-fields">
+          <DateSelect label="Datum" value={date} onChange={setDate} />
+          <TimeInput label="Uhrzeit" value={time} onChange={setTime} />
+        </div>
 
         <div className="form-actions">
           <button type="submit" disabled={isSaving}>
@@ -260,78 +256,79 @@ function BookingForm({
 
         <button
           type="button"
-          aria-pressed={mode === 'PERIOD'}
-          onClick={() => changeMode('PERIOD')}
+          aria-pressed={mode === 'BACKFILL'}
+          onClick={() => changeMode('BACKFILL')}
         >
-          Zeitraum nachtragen
+          Nachtragen
         </button>
       </div>
 
       {mode === 'STAMP' ? (
-        <>
-          <div className="stamp-buttons">
-            {BOOKING_TYPES.map(([type, label]) => (
-              <button
-                key={type}
-                type="button"
-                disabled={isSaving || !allowedTypes.includes(type)}
-                onClick={() => stamp(type)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          <button
-            type="button"
-            className="link-button"
-            onClick={toggleCustomTime}
-          >
-            {useCustomTime
-              ? 'Aktuelle Uhrzeit verwenden'
-              : 'Andere Zeit eingeben'}
-          </button>
-
-          {useCustomTime && dateTimeFields}
-        </>
+        <div className="stamp-buttons">
+          {BOOKING_TYPES.map(([type, label]) => (
+            <button
+              key={type}
+              type="button"
+              disabled={isSaving || !allowedTypes.includes(type)}
+              onClick={() => stamp(type)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       ) : (
         <>
           <label>
             Art
             <select
-              value={periodType}
+              value={backfillType}
               onChange={(event) =>
-                setPeriodType(event.target.value as PeriodType)
+                setBackfillType(event.target.value as BackfillType)
               }
             >
-              <option value="BREAK">Pause</option>
-              <option value="WORK">Arbeitszeit</option>
+              <optgroup label="Zeitraum">
+                <option value="BREAK">Pause</option>
+                <option value="WORK">Arbeitszeit</option>
+              </optgroup>
+              <optgroup label="Einzelbuchung">
+                {BOOKING_TYPES.map(([type, label]) => (
+                  <option key={type} value={type}>
+                    {label}
+                  </option>
+                ))}
+              </optgroup>
             </select>
           </label>
 
           <div className="date-time-fields">
             <DateSelect
               label="Datum"
-              value={periodDate}
-              onChange={setPeriodDate}
+              value={backfillDate}
+              onChange={setBackfillDate}
             />
             <TimeInput
-              label="Beginn"
-              value={periodStart}
-              onChange={setPeriodStart}
+              label={isPeriod ? 'Beginn' : 'Uhrzeit'}
+              value={backfillStart}
+              onChange={setBackfillStart}
             />
-            <TimeInput label="Ende" value={periodEnd} onChange={setPeriodEnd} />
+            {isPeriod && (
+              <TimeInput
+                label="Ende"
+                value={backfillEnd}
+                onChange={setBackfillEnd}
+              />
+            )}
           </div>
 
-          {periodEndsNextDay && periodDate !== '' && (
+          {periodEndsNextDay && backfillDate !== '' && (
             <p className="field-note">
-              Ende am Folgetag ({formatDateKey(addDaysToDateKey(periodDate, 1))})
+              Ende am Folgetag ({formatDateKey(addDaysToDateKey(backfillDate, 1))})
             </p>
           )}
 
           <div className="form-actions">
             <button type="submit" disabled={isSaving}>
-              Zeitraum hinzufügen
+              Nachtragen
             </button>
           </div>
         </>
