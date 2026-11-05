@@ -42,6 +42,30 @@ export function DateSelect({ label, value, onChange }: DateSelectProps) {
   )
 }
 
+type ReasonInputProps = {
+  value: string
+  onChange: (value: string) => void
+}
+
+// Begründung für Nachtragen, Korrigieren und Löschen; steht in der
+// Änderungshistorie. Länge wie im Backend (REASON_MAX_LENGTH).
+export function ReasonInput({ value, onChange }: ReasonInputProps) {
+  return (
+    <label>
+      Begründung
+      <input
+        type="text"
+        maxLength={200}
+        placeholder="z. B. Stempeln vergessen"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
+  )
+}
+
+export const MISSING_REASON_MESSAGE = 'Bitte eine Begründung angeben.'
+
 type TimeInputProps = {
   label: string
   value: string // freie Eingabe, z. B. "830"

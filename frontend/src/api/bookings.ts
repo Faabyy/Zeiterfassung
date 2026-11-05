@@ -89,6 +89,12 @@ export function fetchCurrentUser(): Promise<User> {
   return request('/api/me')
 }
 
+type Settings = { federal_state: string | null }
+
+export function fetchSettings(): Promise<Settings> {
+  return request('/api/settings')
+}
+
 export function fetchBookings(): Promise<Booking[]> {
   return request(BASE_URL)
 }
@@ -101,11 +107,17 @@ export function stampBooking(type: BookingType): Promise<Booking> {
   })
 }
 
+// Nachtragen, Korrigieren und Löschen brauchen eine Begründung, die in der
+// Änderungshistorie steht.
+
 // Nachtragen mit eigenem Zeitpunkt.
-export function createBookings(newBookings: NewBooking[]): Promise<Booking[]> {
+export function createBookings(
+  newBookings: NewBooking[],
+  reason: string,
+): Promise<Booking[]> {
   return request(BASE_URL, {
     method: 'POST',
-    body: JSON.stringify(newBookings),
+    body: JSON.stringify({ bookings: newBookings, reason }),
   })
 }
 
@@ -113,16 +125,18 @@ export function updateBooking(
   id: number,
   type: BookingType,
   timestamp: string,
+  reason: string,
 ): Promise<Booking> {
   return request(`${BASE_URL}/${id}`, {
     method: 'PUT',
-    body: JSON.stringify({ type, timestamp }),
+    body: JSON.stringify({ type, timestamp, reason }),
   })
 }
 
 // Liefert alle gelöschten Buchungen, inklusive mitgelöschter Partner.
-export function deleteBooking(id: number): Promise<Booking[]> {
-  return request(`${BASE_URL}/${id}`, { method: 'DELETE' })
+export function deleteBooking(id: number, reason: string): Promise<Booking[]> {
+  const query = new URLSearchParams({ reason })
+  return request(`${BASE_URL}/${id}?${query}`, { method: 'DELETE' })
 }
 
 type BookingChangeResponse = {
@@ -134,6 +148,7 @@ type BookingChangeResponse = {
   new_type: BookingType | null
   new_timestamp: string | null
   source: BookingSource | null
+  reason: string | null
   changed_at: string
 }
 
@@ -150,6 +165,7 @@ export async function fetchBookingChanges(): Promise<BookingChange[]> {
     newType: change.new_type,
     newTimestamp: change.new_timestamp,
     source: change.source,
+    reason: change.reason,
     changedAt: change.changed_at,
   }))
 }

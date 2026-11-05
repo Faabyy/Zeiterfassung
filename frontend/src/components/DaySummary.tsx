@@ -10,6 +10,8 @@ import {
   MAXIMUM_WORK_BLOCK_MINUTES,
   MINIMUM_BREAK_BLOCK_MINUTES,
 } from '../utils/calculateDay'
+import type { FederalState } from '../utils/surcharges'
+import { FEDERAL_STATE_NAMES } from '../utils/surcharges'
 import {
   formatDateKey,
   formatDuration,
@@ -20,6 +22,7 @@ import {
 type DaySummaryProps = {
   bookings: Booking[]
   now: string // aktuelle Minute, für die laufende Schicht
+  federalState: FederalState | null // für die Landesfeiertage
   selectedDate: string
   onSelectDate: (date: string) => void
 }
@@ -87,6 +90,7 @@ function downloadCsv(days: DayCalculation[], fileName: string) {
 function DaySummary({
   bookings,
   now,
+  federalState,
   selectedDate,
   onSelectDate,
 }: DaySummaryProps) {
@@ -256,6 +260,15 @@ function DaySummary({
             </tfoot>
           </table>
         </div>
+      )}
+
+      {days.length > 0 && (
+        <p className="field-note">
+          Feiertage: bundesweit
+          {federalState
+            ? ` und ${FEDERAL_STATE_NAMES[federalState]}`
+            : ' (Bundesland: APP_FEDERAL_STATE in der .env)'}
+        </p>
       )}
 
       {days.some((day) => day.hasOpenWorkSession) && (

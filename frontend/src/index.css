@@ -350,7 +350,7 @@ button:focus-visible {
 }
 
 .change-list .list-row {
-  grid-template-columns: 170px 90px 1fr;
+  grid-template-columns: 170px 110px 1fr;
   font-size: 14px;
 }
 

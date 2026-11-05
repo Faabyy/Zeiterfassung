@@ -13,6 +13,7 @@
 | 0.5 | 2026-10-26 | Faabyy | Stempeln und Nachtragen getrennt, keine Buchungen in der Zukunft |
 | 0.6 | 2026-10-26 | Faabyy | Anmeldung mit festen Benutzern, Buchungen je Benutzer |
 | 0.7 | 2026-11-05 | Faabyy | Fehlerbehebungen: Korrekturen gekennzeichnet, Historie nicht mehr löschbar, mehrere Schichten am Tag, Zeitumstellung, Sitzungsablauf; Hinweise zu §3 ArbZG, laufende Schicht, Monatsauswahl und CSV-Export |
+| 0.8 | 2026-11-05 | Faabyy | Begründung bei Nachtragen, Korrigieren und Löschen; Landesfeiertage je Bundesland |
 
 ### 1.2 Referenzierte Dokumente
 
@@ -72,7 +73,7 @@ Persönliches Lernprojekt im Rahmen der Ausbildung. Die Anwendung läuft nur lok
 
 ### 3.1 Installation und Konfiguration
 
-Start mit `./dev.sh start` (siehe `README.md`). Die Konfiguration (Datenbankzugang, Ports, Benutzer) steht in der `.env`; eingecheckt ist nur die Vorlage `.env.example`.
+Start mit `./dev.sh start` (siehe `README.md`). Die Konfiguration (Datenbankzugang, Ports, Benutzer, Bundesland) steht in der `.env`; eingecheckt ist nur die Vorlage `.env.example`.
 
 ### 3.2 Autorisierung
 
@@ -172,10 +173,12 @@ Wird länger als 6 Stunden am Stück ohne Pause gearbeitet (ArbZG §4), erschein
 |---|---|
 | Samstag | 25 % |
 | Sonntag | 50 % |
-| Bundesweite Feiertage, 31.12. ab 14 Uhr | 125 % |
+| Bundesweite Feiertage und Feiertage des Bundeslands, 31.12. ab 14 Uhr | 125 % |
 | 1. Mai, 25. und 26.12., 24.12. ab 14 Uhr | 150 % |
 
 Die Feiertagssätze entsprechen den steuerfreien Höchstsätzen nach §3b EStG. Fällt ein Feiertag auf ein Wochenende, gilt nur der höhere Satz.
+
+Das Bundesland steht in der `.env` unter `APP_FEDERAL_STATE` (Kürzel wie `BY` oder `NW`); ohne Angabe gelten nur die bundesweiten Feiertage. Berücksichtigt sind die landesweiten Feiertage: Heilige Drei Könige (BW, BY, ST), Internationaler Frauentag (BE, MV), Oster- und Pfingstsonntag (BB), Fronleichnam (BW, BY, HE, NW, RP, SL), Mariä Himmelfahrt (SL), Weltkindertag (TH), Reformationstag (BB, HB, HH, MV, NI, SN, ST, SH, TH), Allerheiligen (BW, BY, NW, RP, SL) und Buß- und Bettag (SN). Feiertage einzelner Gemeinden (z. B. Mariä Himmelfahrt in Teilen Bayerns, Augsburger Friedensfest) fehlen.
 
 Der Zuschlag gilt für die Nettoarbeitszeit und wird pro Minute berechnet: Eine Schicht von Samstag 22:00 bis Sonntag 04:00 Uhr ergibt 2 Stunden mit 25 % und 4 Stunden mit 50 %. Der Zuschlag wird als Zeit (Minuten) ausgewiesen.
 
@@ -189,6 +192,8 @@ Zwischen dem letzten "Gehen" eines Arbeitstages und dem ersten "Kommen" des näc
 - Nachtragen: eine einzelne Buchung mit Datum und Uhrzeit oder einen Zeitraum (Pause oder Arbeitszeit) mit Datum, Beginn und Ende erfassen, z. B. eine vergessene Pause. Liegt das Ende vor dem Beginn, endet der Zeitraum am Folgetag.
 - Löschen: Damit keine halben Schichten oder Pausen übrig bleiben, wird beim Löschen von "Kommen" oder "Gehen" die ganze Schicht gelöscht, beim Löschen einer Pausenbuchung die ganze Pause. Vorher erscheint eine Bestätigung.
 
+Nachtragen, Bearbeiten und Löschen brauchen eine Begründung (bis 200 Zeichen, z. B. "Stempeln vergessen"), die in der Änderungshistorie steht. Gestempelte Buchungen brauchen keine.
+
 Auch Korrekturen werden nach den Regeln aus 3.10 und 3.13 geprüft. Nachgetragene und korrigierte Zeitpunkte dürfen nicht in der Zukunft liegen. Beim Stempeln setzt der Server den Zeitpunkt, daher ist die Vergangenheit nur über Nachtragen erreichbar.
 
 Jede Anlage, Korrektur und Löschung wird mit altem und neuem Wert protokolliert, nachgetragene Buchungen sind als "Nachgetragen" gekennzeichnet. Abgelehnte Änderungen werden nicht protokolliert. Die Historie lässt sich nicht leeren, damit Korrekturen nachvollziehbar bleiben.
@@ -200,7 +205,7 @@ Jede Anlage, Korrektur und Löschung wird mit altem und neuem Wert protokolliert
 | Neue Buchung | Stempeln nach dem Stempeluhr-Prinzip: Ein Klick auf Kommen, Pause Start, Pause Ende oder Gehen bucht mit der aktuellen Uhrzeit des Servers. Angeboten werden nur die im aktuellen Zustand erlaubten Buchungen. Buchungen sind minutengenau, daher ist pro Minute nur ein Stempel möglich. Einzelbuchungen und Zeiträume mit eigener Zeit werden getrennt davon über "Nachtragen" erfasst (3.14). |
 | Heutige Buchungen | Buchungen des heutigen Arbeitstages mit Bearbeiten und Löschen, nachgetragene und korrigierte Buchungen gekennzeichnet. Läuft noch eine Schicht vom Vortag (Nachtschicht), wird sie als "Laufende Schicht" gezeigt. Ein Klick auf einen Tag in der Tagesübersicht zeigt stattdessen dessen Buchungen. |
 | Tagesübersicht | Status, Netto- und Zuschlagssumme sowie eine Tabelle mit Brutto, Pause, Pausenabzug, Netto und Zuschlägen je Arbeitstag, wahlweise für alle Monate oder einen Monat. Die laufende Schicht wird bis zur aktuellen Uhrzeit mitgerechnet. Hinweise zu Pausen, Höchstarbeitszeit und einem vermutlich vergessenen "Gehen" (Schicht länger als 12 Stunden offen) erscheinen darunter. Die abgeschlossenen Tage lassen sich als CSV exportieren. |
-| Änderungshistorie | Alle Anlagen, Korrekturen und Löschungen, neueste zuerst. |
+| Änderungshistorie | Alle Anlagen, Korrekturen und Löschungen mit Begründung, neueste zuerst. |
 
 Datum und Uhrzeit werden ohne Kalender eingegeben: Das Datum wird aus den letzten 31 Tagen ausgewählt, die Uhrzeit frei eingetippt (z. B. `8`, `830` oder `8:30` für 08:30 Uhr).
 
@@ -231,6 +236,7 @@ Tabelle `booking_changes` (Änderungshistorie):
 | `old_type`, `old_timestamp` | Werte vor der Änderung |
 | `new_type`, `new_timestamp` | Werte nach der Änderung |
 | `source` | Herkunft der Buchung (STAMP oder BACKFILL) |
+| `reason` | Begründung (leer bei gestempelten Buchungen) |
 | `user_id` | Benutzer, dem die Buchung gehört |
 | `changed_at` | Zeitpunkt der Änderung |
 
@@ -271,8 +277,6 @@ Alle Dienste sind nur lokal (`127.0.0.1`) erreichbar, Freigaben sind nicht nöti
 Nicht umgesetzt, weil dafür erst fachliche Entscheidungen nötig sind:
 
 - Nachtzuschläge nach §3b EStG und der Sonn-/Feiertagssatz am Folgetag von 0 bis 4 Uhr
-- Feiertage der Bundesländer (Bundesland wählbar)
 - Soll-Arbeitszeit, Über- und Minusstunden, Abwesenheiten (Urlaub, Krankheit)
 - Monatsabschluss, der ältere Zeiträume gegen Änderungen sperrt; Rollen für Vorgesetzte
-- Begründung bei Korrekturen und Nachträgen
 - Ruhezeitverstoß nur als Hinweis statt als Ablehnung (die Anforderung verlangt bisher die Ablehnung)

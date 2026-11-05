@@ -37,11 +37,79 @@ function addDays(date: Date, days: number): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days)
 }
 
-const holidaysByYear = new Map<number, Map<string, string>>()
+export const FEDERAL_STATE_NAMES = {
+  BW: 'Baden-Württemberg',
+  BY: 'Bayern',
+  BE: 'Berlin',
+  BB: 'Brandenburg',
+  HB: 'Bremen',
+  HH: 'Hamburg',
+  HE: 'Hessen',
+  MV: 'Mecklenburg-Vorpommern',
+  NI: 'Niedersachsen',
+  NW: 'Nordrhein-Westfalen',
+  RP: 'Rheinland-Pfalz',
+  SL: 'Saarland',
+  SN: 'Sachsen',
+  ST: 'Sachsen-Anhalt',
+  SH: 'Schleswig-Holstein',
+  TH: 'Thüringen',
+} as const
 
-// Bundesweite gesetzliche Feiertage eines Jahres (Datum -> Name).
+export type FederalState = keyof typeof FEDERAL_STATE_NAMES
+
+// Bundesland für die Landesfeiertage, null: nur bundesweite Feiertage.
+// Kommt aus der .env (APP_FEDERAL_STATE) über /api/settings und gilt für
+// alle Berechnungen, daher hier zentral statt als Parameter.
+let federalState: FederalState | null = null
+
+export function setFederalState(state: FederalState | null) {
+  federalState = state
+}
+
+// Landesweite Feiertage nach aktuellem Recht. Feiertage, die nur in
+// einzelnen Gemeinden gelten (z. B. Mariä Himmelfahrt in Bayern,
+// Fronleichnam in Teilen Sachsens und Thüringens), fehlen.
+function getStateHolidays(
+  year: number,
+  state: FederalState,
+  easter: Date,
+): Array<[Date, string]> {
+  const stateIn = (...states: FederalState[]) => states.includes(state)
+
+  // Buß- und Bettag: Mittwoch vor dem 23. November.
+  const november22 = new Date(year, 10, 22)
+  const repentanceDay = addDays(november22, -((november22.getDay() + 4) % 7))
+
+  const holidays: Array<[Date, string, boolean]> = [
+    [new Date(year, 0, 6), 'Heilige Drei Könige', stateIn('BW', 'BY', 'ST')],
+    [new Date(year, 2, 8), 'Internationaler Frauentag', stateIn('BE', 'MV')],
+    [easter, 'Ostersonntag', stateIn('BB')],
+    [addDays(easter, 49), 'Pfingstsonntag', stateIn('BB')],
+    [addDays(easter, 60), 'Fronleichnam', stateIn('BW', 'BY', 'HE', 'NW', 'RP', 'SL')],
+    [new Date(year, 7, 15), 'Mariä Himmelfahrt', stateIn('SL')],
+    [new Date(year, 8, 20), 'Weltkindertag', stateIn('TH')],
+    [
+      new Date(year, 9, 31),
+      'Reformationstag',
+      stateIn('BB', 'HB', 'HH', 'MV', 'NI', 'SN', 'ST', 'SH', 'TH'),
+    ],
+    [new Date(year, 10, 1), 'Allerheiligen', stateIn('BW', 'BY', 'NW', 'RP', 'SL')],
+    [repentanceDay, 'Buß- und Bettag', stateIn('SN')],
+  ]
+
+  return holidays
+    .filter(([, , applies]) => applies)
+    .map(([date, name]) => [date, name])
+}
+
+const holidaysByYear = new Map<string, Map<string, string>>()
+
+// Gesetzliche Feiertage eines Jahres (Datum -> Name): bundesweite und die
+// des eingestellten Bundeslands.
 export function getHolidays(year: number): Map<string, string> {
-  const cached = holidaysByYear.get(year)
+  const cacheKey = `${federalState ?? ''}-${year}`
+  const cached = holidaysByYear.get(cacheKey)
 
   if (cached) {
     return cached
@@ -58,13 +126,14 @@ export function getHolidays(year: number): Map<string, string> {
     [new Date(year, 9, 3), 'Tag der Deutschen Einheit'],
     [new Date(year, 11, 25), '1. Weihnachtstag'],
     [new Date(year, 11, 26), '2. Weihnachtstag'],
+    ...(federalState ? getStateHolidays(year, federalState, easter) : []),
   ]
 
   const result = new Map(
     holidays.map(([date, name]) => [toLocalDateKey(date), name]),
   )
 
-  holidaysByYear.set(year, result)
+  holidaysByYear.set(cacheKey, result)
   return result
 }
 

@@ -3,6 +3,7 @@ from datetime import datetime
 import pytest
 
 import app as app_module
+from tests.conftest import REASON, WITH_REASON, backfill, correction
 
 URL = '/api/bookings'
 
@@ -15,7 +16,7 @@ DAY_WITH_PAUSE = [
 
 
 def create(client, *bookings):
-    response = client.post(URL, json=list(bookings))
+    response = client.post(URL, json=backfill(*bookings))
     assert response.status_code == 201, response.text
     return response.json()
 
@@ -61,10 +62,10 @@ def test_seconds_are_dropped(client):
 def test_rule_violation_is_rejected_and_nothing_is_stored(client):
     create(client, *DAY_WITH_PAUSE)
 
-    response = client.post(URL, json=[
+    response = client.post(URL, json=backfill(
         {'type': 'KOMMEN', 'timestamp': '2026-07-19T01:00'},
         {'type': 'GEHEN', 'timestamp': '2026-07-19T02:00'},
-    ])
+    ))
 
     assert response.status_code == 400
     assert 'Mindestruhezeit von 11 Stunden' in response.json()['detail']
@@ -80,7 +81,7 @@ def test_invalid_input_is_rejected(client):
     ]
 
     for body in invalid_bodies:
-        assert client.post(URL, json=body).status_code == 422, body
+        assert client.post(URL, json={'bookings': body, 'reason': 'Test'}).status_code == 422, body
 
     assert stored(client) == []
 
@@ -88,7 +89,7 @@ def test_invalid_input_is_rejected(client):
 def test_update_corrects_booking(client):
     create(client, *DAY_WITH_PAUSE)
 
-    response = client.put(f'{URL}/4', json={'type': 'GEHEN', 'timestamp': '2026-07-18T17:00'})
+    response = client.put(f'{URL}/4', json=correction('GEHEN', '2026-07-18T17:00'))
 
     assert response.status_code == 200
     assert response.json() == {
@@ -104,7 +105,7 @@ def test_update_corrects_booking(client):
 def test_invalid_update_is_rejected_and_nothing_changes(client):
     create(client, *DAY_WITH_PAUSE)
 
-    response = client.put(f'{URL}/4', json={'type': 'GEHEN', 'timestamp': '2026-07-18T12:15'})
+    response = client.put(f'{URL}/4', json=correction('GEHEN', '2026-07-18T12:15'))
 
     assert response.status_code == 400
     assert response.json()['detail'] == 'Während einer laufenden Pause ist nur „Pause Ende“ erlaubt.'
@@ -114,7 +115,7 @@ def test_invalid_update_is_rejected_and_nothing_changes(client):
 def test_update_into_future_is_rejected(client, fixed_now):
     create(client, *DAY_WITH_PAUSE)
 
-    response = client.put(f'{URL}/4', json={'type': 'GEHEN', 'timestamp': '2026-07-20T12:00'})
+    response = client.put(f'{URL}/4', json=correction('GEHEN', '2026-07-20T12:00'))
 
     assert response.status_code == 400
     assert 'liegt in der Zukunft' in response.json()['detail']
@@ -122,7 +123,7 @@ def test_update_into_future_is_rejected(client, fixed_now):
 
 
 def test_update_unknown_booking(client):
-    response = client.put(f'{URL}/99', json={'type': 'GEHEN', 'timestamp': '2026-07-18T17:00'})
+    response = client.put(f'{URL}/99', json=correction('GEHEN', '2026-07-18T17:00'))
 
     assert response.status_code == 404
 
@@ -131,7 +132,7 @@ def test_delete_shift_removes_its_pauses(client):
     create(client, *DAY_WITH_PAUSE)
     create(client, {'type': 'KOMMEN', 'timestamp': '2026-07-20T08:00'})
 
-    response = client.delete(f'{URL}/4')
+    response = client.delete(f'{URL}/4', params=WITH_REASON)
 
     assert response.status_code == 200
     assert [booking['id'] for booking in response.json()] == [1, 2, 3, 4]
@@ -141,7 +142,7 @@ def test_delete_shift_removes_its_pauses(client):
 def test_delete_pause_removes_pause_pair(client):
     create(client, *DAY_WITH_PAUSE)
 
-    response = client.delete(f'{URL}/2')
+    response = client.delete(f'{URL}/2', params=WITH_REASON)
 
     assert [booking['id'] for booking in response.json()] == [2, 3]
     assert stored(client) == [
@@ -154,14 +155,14 @@ def test_delete_open_shift(client):
     create(client, *DAY_WITH_PAUSE)
     create(client, {'type': 'KOMMEN', 'timestamp': '2026-07-20T08:00'})
 
-    response = client.delete(f'{URL}/5')
+    response = client.delete(f'{URL}/5', params=WITH_REASON)
 
     assert [booking['id'] for booking in response.json()] == [5]
     assert len(stored(client)) == 4
 
 
 def test_delete_unknown_booking(client):
-    response = client.delete(f'{URL}/99')
+    response = client.delete(f'{URL}/99', params=WITH_REASON)
 
     assert response.status_code == 404
 
@@ -195,8 +196,8 @@ def changes(client):
 
 def test_history_records_create_update_and_delete(client):
     create(client, DAY_WITH_PAUSE[0], DAY_WITH_PAUSE[3])
-    client.put(f'{URL}/2', json={'type': 'GEHEN', 'timestamp': '2026-07-18T17:00'})
-    client.delete(f'{URL}/1')
+    client.put(f'{URL}/2', json=correction('GEHEN', '2026-07-18T17:00'))
+    client.delete(f'{URL}/1', params=WITH_REASON)
 
     # Neueste Änderung zuerst.
     assert changes(client) == [
@@ -211,8 +212,8 @@ def test_history_records_create_update_and_delete(client):
 def test_rejected_change_is_not_recorded(client):
     create(client, *DAY_WITH_PAUSE)
 
-    client.put(f'{URL}/4', json={'type': 'GEHEN', 'timestamp': '2026-07-18T12:15'})
-    client.post(URL, json=[{'type': 'KOMMEN', 'timestamp': '2026-07-19T01:00'}])
+    client.put(f'{URL}/4', json=correction('GEHEN', '2026-07-18T12:15'))
+    client.post(URL, json=backfill({'type': 'KOMMEN', 'timestamp': '2026-07-19T01:00'}))
 
     assert [change[1] for change in changes(client)] == ['CREATE'] * 4
 
@@ -229,7 +230,7 @@ def test_history_cannot_be_cleared(client):
 def test_update_marks_booking_as_corrected(client):
     create(client, *DAY_WITH_PAUSE)
 
-    response = client.put(f'{URL}/4', json={'type': 'GEHEN', 'timestamp': '2026-07-18T17:00'})
+    response = client.put(f'{URL}/4', json=correction('GEHEN', '2026-07-18T17:00'))
 
     assert response.json()['corrected'] is True
     assert [booking['corrected'] for booking in client.get(URL).json()] == [
@@ -240,7 +241,7 @@ def test_update_marks_booking_as_corrected(client):
 def test_unchanged_update_is_not_recorded(client):
     create(client, *DAY_WITH_PAUSE)
 
-    response = client.put(f'{URL}/4', json={'type': 'GEHEN', 'timestamp': '2026-07-18T16:30'})
+    response = client.put(f'{URL}/4', json=correction('GEHEN', '2026-07-18T16:30'))
 
     assert response.status_code == 200
     assert response.json()['corrected'] is False
@@ -260,7 +261,7 @@ def test_second_shift_on_same_day_is_allowed(client):
 
 
 def test_nonexistent_local_time_is_rejected(client):
-    response = client.post(URL, json=[{'type': 'KOMMEN', 'timestamp': '2026-03-29T02:30'}])
+    response = client.post(URL, json=backfill({'type': 'KOMMEN', 'timestamp': '2026-03-29T02:30'}))
 
     assert response.status_code == 400
     assert 'gibt es nicht' in response.json()['detail']
@@ -316,10 +317,10 @@ def test_backfill_up_to_now_is_allowed(client, fixed_now):
 
 
 def test_backfill_in_future_is_rejected_and_nothing_is_stored(client, fixed_now):
-    response = client.post(URL, json=[
+    response = client.post(URL, json=backfill(
         {'type': 'KOMMEN', 'timestamp': '2026-07-20T08:00'},
         {'type': 'GEHEN', 'timestamp': '2026-07-20T09:16'},
-    ])
+    ))
 
     assert response.status_code == 400
     assert response.json()['detail'] == (
@@ -332,7 +333,7 @@ def test_backfill_in_future_is_rejected_and_nothing_is_stored(client, fixed_now)
 def test_history_records_source(client, fixed_now):
     create(client, {'type': 'KOMMEN', 'timestamp': '2026-07-20T08:00'})
     stamp(client, 'GEHEN')
-    client.delete(f'{URL}/1')
+    client.delete(f'{URL}/1', params=WITH_REASON)
 
     assert [
         (change['action'], change['new_type'] or change['old_type'], change['source'])
@@ -353,3 +354,46 @@ def test_second_stamp_in_same_minute_is_rejected(client, fixed_now):
     assert response.status_code == 400
     assert 'bereits gestempelt' in response.json()['detail']
     assert stored(client) == [('KOMMEN', '2026-07-20T09:15')]
+
+
+def test_history_records_reason(client, fixed_now):
+    stamp(client, 'KOMMEN')
+    client.put(f'{URL}/1', json=correction('KOMMEN', '2026-07-20T08:00'))
+
+    assert [
+        (change['action'], change['reason'])
+        for change in client.get('/api/booking-changes').json()
+    ] == [
+        ('UPDATE', REASON),
+        ('CREATE', None),
+    ]
+
+
+@pytest.mark.parametrize('reason', [None, '', '   ', 'x' * 201])
+def test_changes_without_valid_reason_are_rejected(client, reason):
+    create(client, *DAY_WITH_PAUSE)
+    with_reason = {} if reason is None else {'reason': reason}
+
+    responses = [
+        client.post(URL, json={
+            'bookings': [{'type': 'KOMMEN', 'timestamp': '2026-07-20T08:00'}],
+            **with_reason,
+        }),
+        client.put(f'{URL}/4', json={
+            'type': 'GEHEN', 'timestamp': '2026-07-18T17:00', **with_reason,
+        }),
+        client.delete(f'{URL}/4', params=with_reason),
+    ]
+
+    assert [response.status_code for response in responses] == [422] * 3
+    assert len(stored(client)) == 4
+    assert len(changes(client)) == 4
+
+
+def test_reason_is_trimmed(client):
+    client.post(URL, json={
+        'bookings': [{'type': 'KOMMEN', 'timestamp': '2026-07-18T08:00'}],
+        'reason': '  Stempeluhr defekt  ',
+    })
+
+    assert client.get('/api/booking-changes').json()[0]['reason'] == 'Stempeluhr defekt'

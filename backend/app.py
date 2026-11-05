@@ -9,8 +9,8 @@ from typing import Annotated, Literal
 import psycopg
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import Body, Cookie, Depends, FastAPI, HTTPException, Response
-from pydantic import BaseModel, field_validator
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Response
+from pydantic import AfterValidator, BaseModel, Field, field_validator
 
 import auth
 from booking_groups import find_booking_group
@@ -34,6 +34,13 @@ TIMESTAMP_FORMAT = '%Y-%m-%dT%H:%M'
 
 SESSION_COOKIE = 'session'
 
+# Kürzel der Bundesländer für APP_FEDERAL_STATE (Landesfeiertage). Die
+# Feiertage selbst berechnet das Frontend (frontend/src/utils/surcharges.ts).
+FEDERAL_STATES = {
+    'BW', 'BY', 'BE', 'BB', 'HB', 'HH', 'HE', 'MV',
+    'NI', 'NW', 'RP', 'SL', 'SN', 'ST', 'SH', 'TH',
+}
+
 # Spalten, die zu einer Buchung zurückgeliefert werden.
 BOOKING_COLUMNS = 'id, type, timestamp, source, corrected'
 
@@ -52,6 +59,32 @@ class BookingInput(BaseModel):
         return value.replace(second=0, microsecond=0)
 
 
+# Begründung für alles, was nicht gestempelt wird, z. B. "Stempeln
+# vergessen". Steht in der Änderungshistorie.
+REASON_MAX_LENGTH = 200
+
+
+def check_reason(value: str) -> str:
+    value = value.strip()
+
+    if not value:
+        raise ValueError('Bitte eine Begründung angeben.')
+
+    return value
+
+
+Reason = Annotated[str, Field(max_length=REASON_MAX_LENGTH), AfterValidator(check_reason)]
+
+
+class BackfillInput(BaseModel):
+    bookings: list[BookingInput] = Field(min_length=1)
+    reason: Reason
+
+
+class CorrectionInput(BookingInput):
+    reason: Reason
+
+
 class LoginInput(BaseModel):
     username: str
     password: str
@@ -59,6 +92,10 @@ class LoginInput(BaseModel):
 
 class User(BaseModel):
     username: str
+
+
+class Settings(BaseModel):
+    federal_state: str | None  # None: nur bundesweite Feiertage
 
 
 class StampInput(BaseModel):
@@ -82,6 +119,7 @@ class BookingChange(BaseModel):
     new_type: BookingType | None
     new_timestamp: str | None
     source: BookingSource | None
+    reason: str | None
     changed_at: datetime
 
 
@@ -153,13 +191,15 @@ def log_change(
     action: str,
     old: dict | None,
     new: dict | None,
+    reason: str | None,
 ) -> None:
     booking = new or old
 
     connection.execute(
         'INSERT INTO booking_changes '
-        '(user_id, booking_id, action, old_type, old_timestamp, new_type, new_timestamp, source) '
-        'VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
+        '(user_id, booking_id, action, old_type, old_timestamp, new_type, '
+        'new_timestamp, source, reason) '
+        'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)',
         (
             user_id,
             booking['id'],
@@ -169,6 +209,7 @@ def log_change(
             new['type'] if new else None,
             new['timestamp'] if new else None,
             booking['source'],
+            reason,
         ),
     )
 
@@ -200,6 +241,7 @@ def insert_bookings(
     user_id: int,
     new_rows: list[dict],
     source: str,
+    reason: str | None,
 ) -> list[dict]:
     created_rows = [
         connection.execute(
@@ -211,12 +253,16 @@ def insert_bookings(
     ]
 
     for row in created_rows:
-        log_change(connection, user_id, 'CREATE', old=None, new=row)
+        log_change(connection, user_id, 'CREATE', old=None, new=row, reason=reason)
 
     return created_rows
 
 
 logger = logging.getLogger('uvicorn.error')
+
+
+def federal_state() -> str | None:
+    return os.environ.get('APP_FEDERAL_STATE', '').strip().upper() or None
 
 
 # Bringt das Datenbankschema beim Start auf den neuesten Stand und
@@ -225,6 +271,12 @@ logger = logging.getLogger('uvicorn.error')
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     if not os.environ.get('APP_USERS'):
         raise RuntimeError('APP_USERS fehlt in der .env (Vorlage: .env.example).')
+
+    if federal_state() not in FEDERAL_STATES | {None}:
+        raise RuntimeError(
+            f'APP_FEDERAL_STATE: „{federal_state()}“ ist kein Bundesland-Kürzel '
+            f'({", ".join(sorted(FEDERAL_STATES))}).',
+        )
 
     users = auth.parse_users(os.environ['APP_USERS'])
 
@@ -297,6 +349,11 @@ def me(user: CurrentUser) -> User:
     return User(username=user['username'])
 
 
+@app.get('/api/settings')
+def settings(_user: CurrentUser) -> Settings:
+    return Settings(federal_state=federal_state())
+
+
 @app.get('/api/bookings')
 def list_bookings(user: CurrentUser) -> list[Booking]:
     with transaction() as connection:
@@ -326,30 +383,31 @@ def stamp_booking(stamp: StampInput, user: CurrentUser) -> Booking:
 
         ensure_valid([*rows, new_row], allow_open_booking_sequence=True)
 
-        [created_row] = insert_bookings(connection, user['id'], [new_row], 'STAMP')
+        [created_row] = insert_bookings(
+            connection, user['id'], [new_row], 'STAMP', reason=None,
+        )
 
     return to_booking(created_row)
 
 
-# Nachtragen mit eigenem Zeitpunkt. Mehrere Buchungen (z. B. PAUSE_START +
-# PAUSE_ENDE) werden gemeinsam geprüft, damit sich auch Paare in
-# abgeschlossene Tage nachtragen lassen.
+# Nachtragen mit eigenem Zeitpunkt und Begründung. Mehrere Buchungen
+# (z. B. PAUSE_START + PAUSE_ENDE) werden gemeinsam geprüft, damit sich
+# auch Paare in abgeschlossene Tage nachtragen lassen.
 @app.post('/api/bookings', status_code=201)
-def create_bookings(
-    new_bookings: Annotated[list[BookingInput], Body(min_length=1)],
-    user: CurrentUser,
-) -> list[Booking]:
+def create_bookings(backfill: BackfillInput, user: CurrentUser) -> list[Booking]:
     with transaction() as connection:
         rows = load_bookings_for_update(connection, user['id'])
         new_rows = [
             {'type': booking.type, 'timestamp': booking.timestamp}
-            for booking in new_bookings
+            for booking in backfill.bookings
         ]
 
         ensure_not_in_future([row['timestamp'] for row in new_rows])
         ensure_valid(rows + new_rows, allow_open_booking_sequence=True)
 
-        created_rows = insert_bookings(connection, user['id'], new_rows, 'BACKFILL')
+        created_rows = insert_bookings(
+            connection, user['id'], new_rows, 'BACKFILL', reason=backfill.reason,
+        )
 
     return [to_booking(row) for row in created_rows]
 
@@ -357,7 +415,7 @@ def create_bookings(
 @app.put('/api/bookings/{booking_id}')
 def update_booking(
     booking_id: int,
-    changes: BookingInput,
+    changes: CorrectionInput,
     user: CurrentUser,
 ) -> Booking:
     with transaction() as connection:
@@ -393,15 +451,23 @@ def update_booking(
             (changes.type, changes.timestamp, booking_id),
         ).fetchone()
 
-        log_change(connection, user['id'], 'UPDATE', old=old_row, new=updated_row)
+        log_change(
+            connection, user['id'], 'UPDATE',
+            old=old_row, new=updated_row, reason=changes.reason,
+        )
 
     return to_booking(updated_row)
 
 
 # Löscht die Buchung zusammen mit allem, was ohne sie ungültig würde
 # (siehe find_booking_group), und liefert alle gelöschten Buchungen zurück.
+# Die Begründung kommt als Parameter, weil DELETE keinen Body hat.
 @app.delete('/api/bookings/{booking_id}')
-def delete_booking(booking_id: int, user: CurrentUser) -> list[Booking]:
+def delete_booking(
+    booking_id: int,
+    reason: Annotated[Reason, Query()],
+    user: CurrentUser,
+) -> list[Booking]:
     with transaction() as connection:
         rows = load_bookings_for_update(connection, user['id'])
 
@@ -426,7 +492,7 @@ def delete_booking(booking_id: int, user: CurrentUser) -> list[Booking]:
         deleted_rows.sort(key=lambda row: (row['timestamp'], row['id']))
 
         for row in deleted_rows:
-            log_change(connection, user['id'], 'DELETE', old=row, new=None)
+            log_change(connection, user['id'], 'DELETE', old=row, new=None, reason=reason)
 
     return [to_booking(row) for row in deleted_rows]
 

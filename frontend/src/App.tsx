@@ -7,6 +7,8 @@ import DaySummary from './components/DaySummary'
 import LoginForm from './components/LoginForm'
 import * as bookingApi from './api/bookings'
 import { UnauthorizedError } from './api/bookings'
+import type { FederalState } from './utils/surcharges'
+import { setFederalState } from './utils/surcharges'
 import { BOOKING_TYPE_LABELS } from './types/booking'
 import type {
   Booking,
@@ -70,6 +72,9 @@ function App() {
   const [username, setUsername] = useState<string | null>(null)
   const [bookings, setBookings] = useState<Booking[]>([])
   const [changes, setChanges] = useState<BookingChange[]>([])
+  const [federalState, setFederalStateInView] = useState<FederalState | null>(
+    null,
+  )
   const [isLoading, setIsLoading] = useState(true)
   const [globalError, setGlobalError] = useState('')
   const [bookingToEdit, setBookingToEdit] = useState<Booking | null>(null)
@@ -111,6 +116,14 @@ function App() {
     setGlobalError(prefix + (error as Error).message)
   }
 
+  // Bundesland für die Landesfeiertage aus der .env des Backends.
+  async function loadSettings() {
+    const settings = await bookingApi.fetchSettings()
+    const state = settings.federal_state as FederalState | null
+    setFederalState(state)
+    setFederalStateInView(state)
+  }
+
   // Nach jeder Änderung wird die Liste neu geladen, damit immer der
   // Stand der Datenbank angezeigt wird.
   async function reloadBookings() {
@@ -129,6 +142,7 @@ function App() {
     async function restoreSession() {
       try {
         const user = await bookingApi.fetchCurrentUser()
+        await loadSettings()
         setUsername(user.username)
       } catch (error) {
         if (!(error instanceof UnauthorizedError)) {
@@ -149,6 +163,7 @@ function App() {
   async function login(name: string, password: string) {
     try {
       const user = await bookingApi.login(name, password)
+      await loadSettings()
       setUsername(user.username)
     } catch (error) {
       return (error as Error).message
@@ -201,8 +216,11 @@ function App() {
 
   // Mehrere Buchungen (z. B. PAUSE_START + PAUSE_ENDE) werden gemeinsam
   // geprüft, damit sich auch Paare in abgeschlossene Tage nachtragen lassen.
-  function backfillBookings(newBookings: NewBooking[]): Promise<boolean> {
-    return runAndReload(() => bookingApi.createBookings(newBookings))
+  function backfillBookings(
+    newBookings: NewBooking[],
+    reason: string,
+  ): Promise<boolean> {
+    return runAndReload(() => bookingApi.createBookings(newBookings, reason))
   }
 
   function startEditing(booking: Booking) {
@@ -219,9 +237,10 @@ function App() {
     id: number,
     type: BookingType,
     timestamp: string,
+    reason: string,
   ) {
     try {
-      await bookingApi.updateBooking(id, type, timestamp)
+      await bookingApi.updateBooking(id, type, timestamp, reason)
     } catch (error) {
       showError(error, 'Die Korrektur konnte nicht gespeichert werden: ')
       return
@@ -236,13 +255,13 @@ function App() {
     setBookingIdToDelete(id)
   }
 
-  async function deleteBooking(id: number) {
+  async function deleteBooking(id: number, reason: string) {
     setBookingIdToDelete(null)
 
     let deletedBookings: Booking[]
 
     try {
-      deletedBookings = await bookingApi.deleteBooking(id)
+      deletedBookings = await bookingApi.deleteBooking(id, reason)
     } catch (error) {
       showError(error, 'Die Buchung wurde nicht gelöscht: ')
       return
@@ -317,6 +336,7 @@ function App() {
           <DaySummary
             bookings={bookings}
             now={now}
+            federalState={federalState}
             selectedDate={selectedDate}
             onSelectDate={(date) => setChosenDate(date === today ? null : date)}
           />
@@ -329,7 +349,7 @@ function App() {
         <ConfirmDialog
           message={describeDeletion(bookings, bookingIdToDelete)}
           confirmLabel="Löschen"
-          onConfirm={() => deleteBooking(bookingIdToDelete)}
+          onConfirm={(reason) => deleteBooking(bookingIdToDelete, reason)}
           onCancel={() => setBookingIdToDelete(null)}
         />
       )}

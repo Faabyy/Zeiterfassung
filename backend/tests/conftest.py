@@ -23,6 +23,19 @@ os.environ['APP_USERS'] = ','.join(
 )
 
 
+# Nachtragen, Korrigieren und Löschen brauchen eine Begründung.
+REASON = 'Stempeln vergessen'
+WITH_REASON = {'reason': REASON}
+
+
+def backfill(*bookings: dict) -> dict:
+    return {'bookings': list(bookings), 'reason': REASON}
+
+
+def correction(booking_type: str, timestamp: str) -> dict:
+    return {'type': booking_type, 'timestamp': timestamp, 'reason': REASON}
+
+
 def connect(database: str, **kwargs) -> psycopg.Connection:
     return psycopg.connect(
         host='127.0.0.1',

@@ -2,7 +2,7 @@ import pytest
 
 import auth
 from auth import hash_password, parse_users, sync_users, verify_password
-from tests.conftest import TEST_USERS
+from tests.conftest import TEST_USERS, WITH_REASON, backfill, correction
 
 DAY = [
     {'type': 'KOMMEN', 'timestamp': '2026-07-18T08:00'},
@@ -72,7 +72,7 @@ def test_logout_ends_session(client):
 
 
 def test_users_only_see_their_own_bookings(client, other_client):
-    client.post('/api/bookings', json=DAY)
+    client.post('/api/bookings', json=backfill(*DAY))
 
     assert len(client.get('/api/bookings').json()) == 2
     assert other_client.get('/api/bookings').json() == []
@@ -80,22 +80,22 @@ def test_users_only_see_their_own_bookings(client, other_client):
 
 
 def test_booking_rules_apply_per_user(client, other_client):
-    client.post('/api/bookings', json=DAY)
+    client.post('/api/bookings', json=backfill(*DAY))
 
     # Derselbe Zeitpunkt und keine Ruhezeit-Verletzung beim anderen Benutzer.
-    response = other_client.post('/api/bookings', json=DAY)
+    response = other_client.post('/api/bookings', json=backfill(*DAY))
 
     assert response.status_code == 201, response.text
 
 
 def test_foreign_bookings_cannot_be_changed(client, other_client):
-    [booking, _] = client.post('/api/bookings', json=DAY).json()
+    [booking, _] = client.post('/api/bookings', json=backfill(*DAY)).json()
 
     update = other_client.put(
         f"/api/bookings/{booking['id']}",
-        json={'type': 'KOMMEN', 'timestamp': '2026-07-18T09:00'},
+        json=correction('KOMMEN', '2026-07-18T09:00'),
     )
-    delete = other_client.delete(f"/api/bookings/{booking['id']}")
+    delete = other_client.delete(f"/api/bookings/{booking['id']}", params=WITH_REASON)
 
     assert update.status_code == 404
     assert delete.status_code == 404
@@ -160,3 +160,11 @@ def test_login_is_locked_after_too_many_failures(anonymous_client):
 
     assert response.status_code == 429
     assert 'Zu viele fehlgeschlagene Anmeldungen' in response.json()['detail']
+
+
+def test_settings_name_federal_state(client, monkeypatch):
+    monkeypatch.setenv('APP_FEDERAL_STATE', 'by')
+    assert client.get('/api/settings').json() == {'federal_state': 'BY'}
+
+    monkeypatch.setenv('APP_FEDERAL_STATE', '')
+    assert client.get('/api/settings').json() == {'federal_state': None}

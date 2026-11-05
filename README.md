@@ -33,7 +33,7 @@ Voraussetzungen: Docker, Node.js und `python3.12-venv`.
 ```bash
 ./dev.sh start
 ```
-Danach `http://localhost:5173` öffnen und mit einem Benutzer aus `APP_USERS` in der `.env` anmelden. `Strg+C` beendet alles.
+Danach `http://localhost:5173` öffnen und mit einem Benutzer aus `APP_USERS` in der `.env` anmelden. `Strg+C` beendet alles. Für die Landesfeiertage das Bundesland unter `APP_FEDERAL_STATE` eintragen (z. B. `BY`).
 
 Zum Ausprobieren startet `./dev.sh demo` die App mit einer eigenen Demo-Datenbank voller Testdaten und zeigt, wie sich die neuesten Änderungen prüfen lassen.
 

@@ -186,8 +186,9 @@ SQL
 
   Stempeln und Nachtragen:
    4. Stempeln bucht immer die aktuelle Uhrzeit.
-   5. Nachtragen, Art "Pause", an einem Mo–Do, z. B. 14 bis 1415: in der
-      Liste "(nachgetragen)", in der Historie "Nachgetragen".
+   5. Nachtragen, Art "Pause", an einem Mo–Do, z. B. 14 bis 1415, mit
+      Begründung: in der Liste "(nachgetragen)", in der Historie
+      "Nachgetragen" mit der Begründung. Ohne Begründung wird abgelehnt.
    6. Nachtragen oder Bearbeiten mit einer Uhrzeit in der Zukunft –
       wird mit "liegt in der Zukunft" abgelehnt.
 

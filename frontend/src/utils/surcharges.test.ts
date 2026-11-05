@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { getHolidays, getSurchargeRate } from './surcharges'
+import { afterEach, describe, expect, it } from 'vitest'
+import { getHolidays, getSurchargeRate, setFederalState } from './surcharges'
 
 describe('Feiertage', () => {
   it('berechnet die beweglichen Feiertage aus Ostern', () => {
@@ -50,5 +50,36 @@ describe('Zuschlagssätze', () => {
     expect(rate('2026-12-24T14:00')).toBe(1.5)
     expect(rate('2026-12-31T13:59')).toBe(0)
     expect(rate('2026-12-31T14:00')).toBe(1.25)
+  })
+})
+
+describe('Landesfeiertage', () => {
+  afterEach(() => setFederalState(null))
+
+  it('gelten nur mit eingestelltem Bundesland', () => {
+    expect(getHolidays(2026).has('2026-06-04')).toBe(false)
+
+    setFederalState('BY')
+
+    expect(getHolidays(2026).get('2026-06-04')).toBe('Fronleichnam')
+    expect(getHolidays(2026).get('2026-01-06')).toBe('Heilige Drei Könige')
+    expect(getHolidays(2026).get('2026-11-01')).toBe('Allerheiligen')
+    expect(getHolidays(2026).has('2026-10-31')).toBe(false)
+  })
+
+  it('Buß- und Bettag in Sachsen am Mittwoch vor dem 23. November', () => {
+    setFederalState('SN')
+
+    expect(getHolidays(2026).get('2026-11-18')).toBe('Buß- und Bettag')
+    expect(getHolidays(2025).get('2025-11-19')).toBe('Buß- und Bettag')
+    expect(getHolidays(2026).get('2026-10-31')).toBe('Reformationstag')
+  })
+
+  it('Ostersonntag in Brandenburg mit Feiertagssatz statt Sonntagssatz', () => {
+    expect(getSurchargeRate(new Date('2026-04-05T10:00'))).toBe(0.5)
+
+    setFederalState('BB')
+
+    expect(getSurchargeRate(new Date('2026-04-05T10:00'))).toBe(1.25)
   })
 })

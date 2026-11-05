@@ -1,13 +1,15 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { ReasonInput } from './DateTimeInputs'
 
 type ConfirmDialogProps = {
   message: string
   confirmLabel: string
-  onConfirm: () => void
+  onConfirm: (reason: string) => void
   onCancel: () => void
 }
 
-// Modaler Bestätigungsdialog; Escape und "Abbrechen" brechen ab.
+// Modaler Bestätigungsdialog mit Pflichtfeld für die Begründung; Escape und
+// "Abbrechen" brechen ab.
 function ConfirmDialog({
   message,
   confirmLabel,
@@ -15,6 +17,7 @@ function ConfirmDialog({
   onCancel,
 }: ConfirmDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null)
+  const [reason, setReason] = useState('')
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -35,8 +38,15 @@ function ConfirmDialog({
     >
       <p>{message}</p>
 
+      <ReasonInput value={reason} onChange={setReason} />
+
       <div className="form-actions">
-        <button type="button" className="delete-button" onClick={onConfirm}>
+        <button
+          type="button"
+          className="delete-button"
+          disabled={reason.trim() === ''}
+          onClick={() => onConfirm(reason.trim())}
+        >
           {confirmLabel}
         </button>
 

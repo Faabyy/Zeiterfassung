@@ -12,7 +12,12 @@ import {
   splitTimestamp,
   toLocalTimestamp,
 } from '../utils/timeUtils'
-import { DateSelect, TimeInput } from './DateTimeInputs'
+import {
+  DateSelect,
+  MISSING_REASON_MESSAGE,
+  ReasonInput,
+  TimeInput,
+} from './DateTimeInputs'
 
 type FormMode = 'STAMP' | 'BACKFILL'
 type PeriodType = 'WORK' | 'BREAK'
@@ -39,12 +44,13 @@ function isPeriodType(type: BackfillType): type is PeriodType {
 type BookingFormProps = {
   bookings: Booking[]
   onStamp: (type: BookingType) => Promise<void>
-  onBackfill: (newBookings: NewBooking[]) => Promise<boolean>
+  onBackfill: (newBookings: NewBooking[], reason: string) => Promise<boolean>
   bookingToEdit: Booking | null
   onUpdateBooking: (
     id: number,
     type: BookingType,
     timestamp: string,
+    reason: string,
   ) => Promise<void>
   onCancelEdit: () => void
 }
@@ -69,12 +75,14 @@ function BookingForm({
   const [editType, setEditType] = useState<BookingType>('KOMMEN')
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
+  const [editReason, setEditReason] = useState('')
 
   // Nachtragen
   const [backfillType, setBackfillType] = useState<BackfillType>('BREAK')
   const [backfillDate, setBackfillDate] = useState('')
   const [backfillStart, setBackfillStart] = useState('')
   const [backfillEnd, setBackfillEnd] = useState('')
+  const [backfillReason, setBackfillReason] = useState('')
 
   useEffect(() => {
     setError('')
@@ -84,6 +92,7 @@ function BookingForm({
       setEditType(bookingToEdit.type)
       setDate(date)
       setTime(time)
+      setEditReason('')
     }
   }, [bookingToEdit])
 
@@ -157,13 +166,19 @@ function BookingForm({
       return
     }
 
+    if (backfillReason.trim() === '') {
+      setError(MISSING_REASON_MESSAGE)
+      return
+    }
+
     setError('')
     save(async () => {
-      const added = await onBackfill(newBookings)
+      const added = await onBackfill(newBookings, backfillReason.trim())
 
       if (added) {
         setBackfillStart('')
         setBackfillEnd('')
+        setBackfillReason('')
       }
     })
   }
@@ -180,9 +195,19 @@ function BookingForm({
       return
     }
 
+    if (editReason.trim() === '') {
+      setError(MISSING_REASON_MESSAGE)
+      return
+    }
+
     setError('')
     save(() =>
-      onUpdateBooking(bookingToEdit.id, editType, `${date}T${editTime}`),
+      onUpdateBooking(
+        bookingToEdit.id,
+        editType,
+        `${date}T${editTime}`,
+        editReason.trim(),
+      ),
     )
   }
 
@@ -221,6 +246,8 @@ function BookingForm({
           <DateSelect label="Datum" value={date} onChange={setDate} />
           <TimeInput label="Uhrzeit" value={time} onChange={setTime} />
         </div>
+
+        <ReasonInput value={editReason} onChange={setEditReason} />
 
         <div className="form-actions">
           <button type="submit" disabled={isSaving}>
@@ -325,6 +352,8 @@ function BookingForm({
               Ende am Folgetag ({formatDateKey(addDaysToDateKey(backfillDate, 1))})
             </p>
           )}
+
+          <ReasonInput value={backfillReason} onChange={setBackfillReason} />
 
           <div className="form-actions">
             <button type="submit" disabled={isSaving}>

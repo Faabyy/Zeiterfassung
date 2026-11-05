@@ -22,6 +22,7 @@ export type BookingChange = {
   newType: BookingType | null
   newTimestamp: string | null
   source: BookingSource | null // null bei Einträgen von vor der Einführung
+  reason: string | null // Begründung, fehlt bei gestempelten Buchungen
   changedAt: string
 }
 

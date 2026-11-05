@@ -49,6 +49,9 @@ function ChangeHistory({ changes }: ChangeHistoryProps) {
                       change.newType ?? change.oldType,
                       change.newTimestamp ?? change.oldTimestamp,
                     )}
+                {change.reason && (
+                  <span className="muted"> – {change.reason}</span>
+                )}
               </span>
             </li>
           ))}
