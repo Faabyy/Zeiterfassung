@@ -1,5 +1,6 @@
 import pytest
 
+import auth
 from auth import hash_password, parse_users, sync_users, verify_password
 from tests.conftest import TEST_USERS
 
@@ -19,6 +20,10 @@ def test_password_hash_round_trip():
 
 def test_parse_users():
     assert parse_users('max:eins, anna:zwei:drei') == {'max': 'eins', 'anna': 'zwei:drei'}
+
+
+def test_parse_users_keeps_spaces_in_password():
+    assert parse_users('max: mit leerzeichen ') == {'max': ' mit leerzeichen '}
 
 
 @pytest.mark.parametrize('value', ['', 'max', 'max:', ':geheim', 'max:a,max:b'])
@@ -97,14 +102,6 @@ def test_foreign_bookings_cannot_be_changed(client, other_client):
     assert len(client.get('/api/bookings').json()) == 2
 
 
-def test_clearing_history_only_affects_own_entries(client, other_client):
-    client.post('/api/bookings', json=DAY)
-    other_client.post('/api/bookings', json=DAY)
-
-    assert client.delete('/api/booking-changes').json() == {'deleted': 2}
-    assert len(other_client.get('/api/booking-changes').json()) == 2
-
-
 def test_removed_user_can_no_longer_log_in(client, test_connection):
     sync_users(test_connection, {'andere': TEST_USERS['andere']})
 
@@ -125,3 +122,41 @@ def test_bookings_without_user_go_to_first_user(client, test_connection):
     assert [booking['timestamp'] for booking in client.get('/api/bookings').json()] == [
         '2026-07-18T08:00',
     ]
+
+
+def test_password_change_ends_sessions(client, test_connection):
+    sync_users(test_connection, {**TEST_USERS, 'test': 'neues-passwort'})
+
+    assert client.get('/api/me').status_code == 401
+
+    sync_users(test_connection, TEST_USERS)
+
+
+def test_unchanged_password_keeps_sessions(client, test_connection):
+    sync_users(test_connection, TEST_USERS)
+
+    assert client.get('/api/me').status_code == 200
+
+
+def test_expired_session_is_rejected(client, test_connection):
+    with test_connection.transaction():
+        test_connection.execute(
+            "UPDATE sessions SET created_at = now() - interval '13 hours'",
+        )
+
+    assert client.get('/api/me').status_code == 401
+
+
+def test_login_is_locked_after_too_many_failures(anonymous_client):
+    for _ in range(auth.MAX_FAILED_LOGINS):
+        response = anonymous_client.post(
+            '/api/login', json={'username': 'test', 'password': 'falsch'},
+        )
+        assert response.status_code == 401
+
+    response = anonymous_client.post(
+        '/api/login', json={'username': 'test', 'password': TEST_USERS['test']},
+    )
+
+    assert response.status_code == 429
+    assert 'Zu viele fehlgeschlagene Anmeldungen' in response.json()['detail']

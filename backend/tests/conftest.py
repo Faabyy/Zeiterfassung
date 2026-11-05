@@ -72,12 +72,15 @@ def login(test_client, username: str) -> None:
 def anonymous_client(test_database):
     from fastapi.testclient import TestClient
 
+    import auth
     from app import app
 
     with connect(TEST_DATABASE) as connection:
         connection.execute(
             'TRUNCATE bookings, booking_changes, sessions RESTART IDENTITY',
         )
+
+    auth.failed_logins.clear()
 
     with TestClient(app) as test_client:
         yield test_client

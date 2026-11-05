@@ -96,6 +96,7 @@ def test_update_corrects_booking(client):
         'type': 'GEHEN',
         'timestamp': '2026-07-18T17:00',
         'source': 'BACKFILL',
+        'corrected': True,
     }
     assert stored(client)[-1] == ('GEHEN', '2026-07-18T17:00')
 
@@ -216,15 +217,53 @@ def test_rejected_change_is_not_recorded(client):
     assert [change[1] for change in changes(client)] == ['CREATE'] * 4
 
 
-def test_history_can_be_cleared(client):
+def test_history_cannot_be_cleared(client):
     create(client, *DAY_WITH_PAUSE)
 
     response = client.delete('/api/booking-changes')
 
+    assert response.status_code == 405
+    assert len(changes(client)) == 4
+
+
+def test_update_marks_booking_as_corrected(client):
+    create(client, *DAY_WITH_PAUSE)
+
+    response = client.put(f'{URL}/4', json={'type': 'GEHEN', 'timestamp': '2026-07-18T17:00'})
+
+    assert response.json()['corrected'] is True
+    assert [booking['corrected'] for booking in client.get(URL).json()] == [
+        False, False, False, True,
+    ]
+
+
+def test_unchanged_update_is_not_recorded(client):
+    create(client, *DAY_WITH_PAUSE)
+
+    response = client.put(f'{URL}/4', json={'type': 'GEHEN', 'timestamp': '2026-07-18T16:30'})
+
     assert response.status_code == 200
-    assert response.json() == {'deleted': 4}
-    assert changes(client) == []
+    assert response.json()['corrected'] is False
+    assert [change[1] for change in changes(client)] == ['CREATE'] * 4
+
+
+def test_second_shift_on_same_day_is_allowed(client):
+    create(
+        client,
+        {'type': 'KOMMEN', 'timestamp': '2026-07-18T08:00'},
+        {'type': 'GEHEN', 'timestamp': '2026-07-18T12:00'},
+        {'type': 'KOMMEN', 'timestamp': '2026-07-18T14:00'},
+        {'type': 'GEHEN', 'timestamp': '2026-07-18T17:00'},
+    )
+
     assert len(stored(client)) == 4
+
+
+def test_nonexistent_local_time_is_rejected(client):
+    response = client.post(URL, json=[{'type': 'KOMMEN', 'timestamp': '2026-03-29T02:30'}])
+
+    assert response.status_code == 400
+    assert 'gibt es nicht' in response.json()['detail']
 
 
 # Legt die Serverzeit für Stempeln und die Zukunftsprüfung fest.
@@ -248,6 +287,7 @@ def test_stamp_uses_server_time(client, fixed_now):
         'type': 'KOMMEN',
         'timestamp': '2026-07-20T09:15',
         'source': 'STAMP',
+        'corrected': False,
     }
 
 
@@ -303,3 +343,13 @@ def test_history_records_source(client, fixed_now):
         ('CREATE', 'GEHEN', 'STAMP'),
         ('CREATE', 'KOMMEN', 'BACKFILL'),
     ]
+
+
+def test_second_stamp_in_same_minute_is_rejected(client, fixed_now):
+    stamp(client, 'KOMMEN')
+
+    response = stamp(client, 'PAUSE_START')
+
+    assert response.status_code == 400
+    assert 'bereits gestempelt' in response.json()['detail']
+    assert stored(client) == [('KOMMEN', '2026-07-20T09:15')]

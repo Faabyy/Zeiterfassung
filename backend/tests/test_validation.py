@@ -106,3 +106,42 @@ def test_timestamp_in_future_is_rejected():
         'Der Zeitpunkt Sa., 18.07., 12:01 liegt in der Zukunft. '
         'Buchungen sind nur bis zur aktuellen Uhrzeit möglich.'
     )
+
+
+def test_second_shift_on_same_day_needs_no_rest_period():
+    bookings = [
+        entry('KOMMEN', '2026-07-13T08:00'),
+        entry('GEHEN', '2026-07-13T12:00'),
+        entry('KOMMEN', '2026-07-13T14:00'),
+        entry('GEHEN', '2026-07-13T17:00'),
+    ]
+
+    assert validate_booking_list(bookings, False) is None
+
+
+def test_rest_period_applies_after_night_shift():
+    bookings = [
+        entry('KOMMEN', '2026-07-13T22:00'),
+        entry('GEHEN', '2026-07-14T06:00'),
+        entry('KOMMEN', '2026-07-14T14:00'),
+    ]
+
+    assert 'erst 8:00 Std. vergangen' in validate_booking_list(bookings, True)
+
+
+def test_rest_period_counts_real_time_at_daylight_saving_change():
+    # In der Nacht zum 29.03.2026 wird die Uhr eine Stunde vorgestellt.
+    bookings = [
+        entry('KOMMEN', '2026-03-28T10:00'),
+        entry('GEHEN', '2026-03-28T20:00'),
+        entry('KOMMEN', '2026-03-29T07:00'),
+    ]
+
+    assert 'erst 10:00 Std. vergangen' in validate_booking_list(bookings, True)
+
+
+def test_nonexistent_local_time_is_rejected():
+    now = datetime.fromisoformat('2026-07-18T12:00')
+    timestamps = [datetime.fromisoformat('2026-03-29T02:30')]
+
+    assert 'gibt es nicht' in validate_not_in_future(timestamps, now)

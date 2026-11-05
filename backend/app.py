@@ -16,7 +16,12 @@ import auth
 from booking_groups import find_booking_group
 from database import get_connection_info, transaction
 from migrate import migrate
-from validation import BookingEntry, validate_booking_list, validate_not_in_future
+from validation import (
+    LOCAL_TIMEZONE,
+    BookingEntry,
+    validate_booking_list,
+    validate_not_in_future,
+)
 
 load_dotenv(Path(__file__).resolve().parent.parent / '.env')
 
@@ -28,6 +33,9 @@ BookingSource = Literal['STAMP', 'BACKFILL']
 TIMESTAMP_FORMAT = '%Y-%m-%dT%H:%M'
 
 SESSION_COOKIE = 'session'
+
+# Spalten, die zu einer Buchung zurückgeliefert werden.
+BOOKING_COLUMNS = 'id, type, timestamp, source, corrected'
 
 
 class BookingInput(BaseModel):
@@ -62,6 +70,7 @@ class Booking(BaseModel):
     type: BookingType
     timestamp: str
     source: BookingSource
+    corrected: bool
 
 
 class BookingChange(BaseModel):
@@ -86,12 +95,17 @@ def to_booking(row: dict) -> Booking:
         type=row['type'],
         timestamp=row['timestamp'].strftime(TIMESTAMP_FORMAT),
         source=row['source'],
+        corrected=row['corrected'],
     )
 
 
-# Aktuelle lokale Uhrzeit, minutengenau wie alle Buchungen.
+# Aktuelle Uhrzeit in der Zeitzone der Buchungen, minutengenau. Nicht die
+# Zeitzone des Servers, die z. B. in einem Container UTC sein kann.
 def current_minute() -> datetime:
-    return datetime.now().replace(second=0, microsecond=0)
+    return (
+        datetime.now(LOCAL_TIMEZONE)
+        .replace(tzinfo=None, second=0, microsecond=0)
+    )
 
 
 # Prüft das Sitzungs-Cookie und liefert den angemeldeten Benutzer.
@@ -115,7 +129,7 @@ CurrentUser = Annotated[dict, Depends(current_user)]
 
 def load_bookings(connection: psycopg.Connection, user_id: int) -> list[dict]:
     return connection.execute(
-        'SELECT id, type, timestamp, source FROM bookings '
+        f'SELECT {BOOKING_COLUMNS} FROM bookings '
         'WHERE user_id = %s ORDER BY timestamp, id',
         (user_id,),
     ).fetchall()
@@ -190,7 +204,7 @@ def insert_bookings(
     created_rows = [
         connection.execute(
             'INSERT INTO bookings (user_id, type, timestamp, source) '
-            'VALUES (%s, %s, %s, %s) RETURNING id, type, timestamp, source',
+            f'VALUES (%s, %s, %s, %s) RETURNING {BOOKING_COLUMNS}',
             (user_id, row['type'], row['timestamp'], source),
         ).fetchone()
         for row in new_rows
@@ -230,6 +244,17 @@ app = FastAPI(title='Zeiterfassung', lifespan=lifespan)
 
 @app.post('/api/login')
 def login(credentials: LoginInput, response: Response) -> User:
+    locked_minutes = auth.locked_minutes(credentials.username)
+
+    if locked_minutes:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                'Zu viele fehlgeschlagene Anmeldungen. Bitte in '
+                f'{locked_minutes} Minuten erneut versuchen.'
+            ),
+        )
+
     with transaction() as connection:
         user_id = auth.check_login(
             connection, credentials.username, credentials.password,
@@ -244,7 +269,13 @@ def login(credentials: LoginInput, response: Response) -> User:
         token = auth.create_session(connection, user_id)
 
     # HttpOnly: Das Frontend kommt nicht an den Token, nur der Browser.
-    response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite='strict')
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        httponly=True,
+        samesite='strict',
+        max_age=int(auth.SESSION_LIFETIME.total_seconds()),
+    )
 
     return User(username=credentials.username)
 
@@ -281,6 +312,17 @@ def stamp_booking(stamp: StampInput, user: CurrentUser) -> Booking:
     with transaction() as connection:
         rows = load_bookings_for_update(connection, user['id'])
         new_row = {'type': stamp.type, 'timestamp': current_minute()}
+
+        # Buchungen sind minutengenau; zwei Stempel in derselben Minute
+        # hätten denselben Zeitpunkt.
+        if any(row['timestamp'] == new_row['timestamp'] for row in rows):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    'In dieser Minute wurde bereits gestempelt. Bitte bis zur '
+                    'nächsten Minute warten oder die letzte Buchung korrigieren.'
+                ),
+            )
 
         ensure_valid([*rows, new_row], allow_open_booking_sequence=True)
 
@@ -330,6 +372,10 @@ def update_booking(
                 detail='Die zu ändernde Buchung wurde nicht gefunden.',
             )
 
+        # Unveränderte Korrektur: nichts speichern, nichts protokollieren.
+        if (old_row['type'], old_row['timestamp']) == (changes.type, changes.timestamp):
+            return to_booking(old_row)
+
         ensure_not_in_future([changes.timestamp])
 
         updated_rows = [
@@ -342,8 +388,8 @@ def update_booking(
         ensure_valid(updated_rows, allow_open_booking_sequence=True)
 
         updated_row = connection.execute(
-            'UPDATE bookings SET type = %s, timestamp = %s, updated_at = now() '
-            'WHERE id = %s RETURNING id, type, timestamp, source',
+            'UPDATE bookings SET type = %s, timestamp = %s, corrected = true, '
+            f'updated_at = now() WHERE id = %s RETURNING {BOOKING_COLUMNS}',
             (changes.type, changes.timestamp, booking_id),
         ).fetchone()
 
@@ -373,7 +419,7 @@ def delete_booking(booking_id: int, user: CurrentUser) -> list[Booking]:
 
         deleted_rows = connection.execute(
             'DELETE FROM bookings WHERE id = ANY(%s) '
-            'RETURNING id, type, timestamp, source',
+            f'RETURNING {BOOKING_COLUMNS}',
             (list(group_ids),),
         ).fetchall()
 
@@ -385,7 +431,8 @@ def delete_booking(booking_id: int, user: CurrentUser) -> list[Booking]:
     return [to_booking(row) for row in deleted_rows]
 
 
-# Änderungsprotokoll, neueste Änderung zuerst.
+# Änderungsprotokoll, neueste Änderung zuerst. Es lässt sich bewusst nicht
+# leeren, damit Korrekturen nachvollziehbar bleiben.
 @app.get('/api/booking-changes')
 def list_booking_changes(user: CurrentUser) -> list[BookingChange]:
     with transaction() as connection:
@@ -405,18 +452,6 @@ def list_booking_changes(user: CurrentUser) -> list[BookingChange]:
         )
         for row in rows
     ]
-
-
-# Leert das Änderungsprotokoll und liefert die Anzahl gelöschter Einträge.
-@app.delete('/api/booking-changes')
-def clear_booking_changes(user: CurrentUser) -> dict[str, int]:
-    with transaction() as connection:
-        deleted = connection.execute(
-            'DELETE FROM booking_changes WHERE user_id = %s',
-            (user['id'],),
-        ).rowcount
-
-    return {'deleted': deleted}
 
 
 if __name__ == '__main__':
