@@ -17,12 +17,31 @@ import type {
 import {
   filterBookingsByWorkDay,
   findBookingGroup,
+  findOpenShift,
 } from './utils/bookingGroups'
 import {
   formatDateKey,
   formatTimestamp,
   toLocalTimestamp,
 } from './utils/timeUtils'
+
+// Aktuelle Minute als Zeitstempel, aktualisiert sich alle 15 Sekunden.
+// Damit laufen die Zeiten der offenen Schicht mit, und "heute" wechselt
+// um Mitternacht auch bei offener Seite.
+function useCurrentMinute(): string {
+  const [now, setNow] = useState(() => toLocalTimestamp(new Date()))
+
+  useEffect(() => {
+    const timer = setInterval(
+      () => setNow(toLocalTimestamp(new Date())),
+      15 * 1000,
+    )
+
+    return () => clearInterval(timer)
+  }, [])
+
+  return now
+}
 
 function describeDeletion(bookings: Booking[], id: number): string {
   const group = findBookingGroup(bookings, id)
@@ -57,13 +76,21 @@ function App() {
   const [bookingIdToDelete, setBookingIdToDelete] = useState<number | null>(
     null,
   )
-  const [isClearingHistory, setIsClearingHistory] = useState(false)
   const errorRef = useRef<HTMLParagraphElement>(null)
 
-  // Die Buchungsliste zeigt einen Arbeitstag, standardmäßig heute.
-  const today = toLocalTimestamp(new Date()).slice(0, 10)
-  const [selectedDate, setSelectedDate] = useState(today)
+  // Die Buchungsliste zeigt einen Arbeitstag, standardmäßig heute
+  // (null: immer der aktuelle Tag, auch nach Mitternacht).
+  const now = useCurrentMinute()
+  const today = now.slice(0, 10)
+  const [chosenDate, setChosenDate] = useState<string | null>(null)
+  const selectedDate = chosenDate ?? today
   const isToday = selectedDate === today
+
+  // Eine laufende Schicht von gestern (Nachtschicht) gehört zu heute.
+  const dayBookings = filterBookingsByWorkDay(bookings, selectedDate)
+  const openShift = findOpenShift(bookings)
+  const showsOpenShift = isToday && dayBookings.length === 0 && openShift.length > 0
+  const listBookings = showsOpenShift ? openShift : dayBookings
 
   function resetSession() {
     setUsername(null)
@@ -71,7 +98,6 @@ function App() {
     setChanges([])
     setBookingToEdit(null)
     setBookingIdToDelete(null)
-    setIsClearingHistory(false)
   }
 
   // Ist die Sitzung abgelaufen, geht es zurück zur Anmeldung.
@@ -129,7 +155,7 @@ function App() {
     }
 
     setGlobalError('')
-    setSelectedDate(today)
+    setChosenDate(null)
     await reloadBookings()
     return null
   }
@@ -230,20 +256,6 @@ function App() {
     await reloadBookings()
   }
 
-  async function clearHistory() {
-    setIsClearingHistory(false)
-
-    try {
-      await bookingApi.clearBookingChanges()
-    } catch (error) {
-      showError(error, 'Die Historie wurde nicht geleert: ')
-      return
-    }
-
-    setGlobalError('')
-    await reloadBookings()
-  }
-
   return (
     <div className="app">
       <header className="app-header">
@@ -288,13 +300,15 @@ function App() {
 
             <BookingList
               title={
-                isToday
-                  ? 'Heutige Buchungen'
-                  : `Buchungen vom ${formatDateKey(selectedDate)}`
+                showsOpenShift
+                  ? 'Laufende Schicht'
+                  : isToday
+                    ? 'Heutige Buchungen'
+                    : `Buchungen vom ${formatDateKey(selectedDate)}`
               }
-              workDay={selectedDate}
-              bookings={filterBookingsByWorkDay(bookings, selectedDate)}
-              onShowToday={isToday ? undefined : () => setSelectedDate(today)}
+              workDay={showsOpenShift ? openShift[0].timestamp.slice(0, 10) : selectedDate}
+              bookings={listBookings}
+              onShowToday={isToday ? undefined : () => setChosenDate(null)}
               onEditBooking={startEditing}
               onDeleteBooking={requestDeletion}
             />
@@ -302,14 +316,12 @@ function App() {
 
           <DaySummary
             bookings={bookings}
+            now={now}
             selectedDate={selectedDate}
-            onSelectDate={setSelectedDate}
+            onSelectDate={(date) => setChosenDate(date === today ? null : date)}
           />
 
-          <ChangeHistory
-            changes={changes}
-            onClear={() => setIsClearingHistory(true)}
-          />
+          <ChangeHistory changes={changes} />
         </>
       )}
 
@@ -322,14 +334,6 @@ function App() {
         />
       )}
 
-      {isClearingHistory && (
-        <ConfirmDialog
-          message="Die komplette Änderungshistorie löschen? Die Buchungen selbst bleiben erhalten."
-          confirmLabel="Leeren"
-          onConfirm={clearHistory}
-          onCancel={() => setIsClearingHistory(false)}
-        />
-      )}
     </div>
   )
 }

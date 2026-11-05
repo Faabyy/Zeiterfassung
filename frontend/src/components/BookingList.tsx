@@ -53,6 +53,9 @@ function BookingList({
                   {booking.source === 'BACKFILL' && (
                     <span className="muted"> (nachgetragen)</span>
                   )}
+                  {booking.corrected && (
+                    <span className="muted"> (korrigiert)</span>
+                  )}
                 </span>
 
                 <span className="row-actions">

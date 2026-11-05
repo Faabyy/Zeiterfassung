@@ -1,19 +1,25 @@
+import { useState } from 'react'
 import type { Booking } from '../types/booking'
 import type { BookingStatus } from '../types/bookingStatus'
 import { getCurrentBookingStatus } from '../utils/bookingStatus'
+import type { DayCalculation } from '../utils/calculateDay'
 import {
   calculateDays,
+  FORGOTTEN_GEHEN_MINUTES,
+  MAXIMUM_DAILY_WORK_MINUTES,
   MAXIMUM_WORK_BLOCK_MINUTES,
   MINIMUM_BREAK_BLOCK_MINUTES,
 } from '../utils/calculateDay'
 import {
   formatDateKey,
+  formatDuration,
   formatHours,
   formatTimestamp,
 } from '../utils/timeUtils'
 
 type DaySummaryProps = {
   bookings: Booking[]
+  now: string // aktuelle Minute, für die laufende Schicht
   selectedDate: string
   onSelectDate: (date: string) => void
 }
@@ -31,15 +37,71 @@ const STATUS_LABELS: Record<BookingStatus, string> = {
   ON_BREAK: 'In Pause',
 }
 
+function formatMonth(month: string): string {
+  const [year, monthNumber] = month.split('-').map(Number)
+  return new Date(year, monthNumber - 1, 1).toLocaleDateString('de-DE', {
+    month: 'long',
+    year: 'numeric',
+  })
+}
+
+// Abgeschlossene Tage als CSV (Semikolon, mit BOM für Excel).
+function downloadCsv(days: DayCalculation[], fileName: string) {
+  const header = [
+    'Arbeitstag',
+    'Brutto',
+    'Pause',
+    'Pausenabzug',
+    'Netto',
+    'Samstag',
+    'Sonntag',
+    'Feiertag',
+    'Zuschlag',
+    'Gesamt',
+  ]
+  const rows = days.map((day) => [
+    day.date,
+    ...[
+      day.workedMinutes,
+      day.breakMinutes,
+      day.automaticBreakMinutes,
+      day.netMinutes,
+      day.saturdayMinutes,
+      day.sundayMinutes,
+      day.holidayMinutes,
+      day.surchargeMinutes,
+      day.netMinutes + day.surchargeMinutes,
+    ].map(formatDuration),
+  ])
+  const csv = [header, ...rows].map((row) => row.join(';')).join('\r\n')
+
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(
+    new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }),
+  )
+  link.download = fileName
+  link.click()
+  URL.revokeObjectURL(link.href)
+}
+
 function DaySummary({
   bookings,
+  now,
   selectedDate,
   onSelectDate,
 }: DaySummaryProps) {
   const lastBooking = bookings[bookings.length - 1]
   const currentStatus = getCurrentBookingStatus(bookings)
 
-  const days = calculateDays(bookings)
+  // Monat der Auswertung ("2026-10"), leer: alle Monate.
+  const [month, setMonth] = useState('')
+
+  const allDays = calculateDays(bookings, now)
+  const months = [...new Set(allDays.map((day) => day.date.slice(0, 7)))]
+    .sort()
+    .reverse()
+  const days = allDays.filter((day) => day.date.startsWith(month))
+  const closedDays = days.filter((day) => !day.hasOpenWorkSession)
 
   // Ein Klick auf eine Zeile zeigt die Buchungen dieses Tages in der Liste.
   function rowClassName(date: string, extra = ''): string {
@@ -54,7 +116,35 @@ function DaySummary({
 
   return (
     <div className="card">
-      <h2>Tagesübersicht</h2>
+      <div className="card-header">
+        <h2>Tagesübersicht</h2>
+
+        <div className="summary-actions">
+          <select
+            aria-label="Zeitraum"
+            value={month}
+            onChange={(event) => setMonth(event.target.value)}
+          >
+            <option value="">Alle Monate</option>
+            {months.map((candidate) => (
+              <option key={candidate} value={candidate}>
+                {formatMonth(candidate)}
+              </option>
+            ))}
+          </select>
+
+          <button
+            type="button"
+            className="small-button secondary-button"
+            disabled={closedDays.length === 0}
+            onClick={() =>
+              downloadCsv(closedDays, `zeiterfassung-${month || 'alle'}.csv`)
+            }
+          >
+            CSV exportieren
+          </button>
+        </div>
+      </div>
 
       <div className="summary-tiles">
         <div className="summary-tile">
@@ -78,6 +168,7 @@ function DaySummary({
           <span className="summary-detail">
             Netto {formatHours(sum('netMinutes'))} + Zuschläge{' '}
             {formatHours(sum('surchargeMinutes'))}
+            {closedDays.length < days.length && ', inkl. laufender Schicht'}
           </span>
         </div>
 
@@ -115,40 +206,41 @@ function DaySummary({
               </tr>
             </thead>
             <tbody>
-              {days.map((day) =>
-                day.hasOpenWorkSession ? (
-                  <tr
-                    key={day.date}
-                    className={rowClassName(day.date, 'open-day')}
-                    onClick={() => onSelectDate(day.date)}
-                  >
-                    <td>
-                      {formatDateKey(day.date)}{' '}
-                      <span className="status-badge status-WORKING">läuft</span>
-                    </td>
-                    <td colSpan={9}>Wird nach dem Gehen berechnet</td>
-                  </tr>
-                ) : (
-                  <tr
-                    key={day.date}
-                    className={rowClassName(day.date)}
-                    onClick={() => onSelectDate(day.date)}
-                  >
-                    <td>{formatDateKey(day.date)}</td>
-                    <td>{formatHours(day.workedMinutes)}</td>
-                    <td>{formatHours(day.breakMinutes)}</td>
-                    <td>{formatHours(day.automaticBreakMinutes)}</td>
-                    <td className="net">{formatHours(day.netMinutes)}</td>
-                    <td className="group-start">{formatHours(day.saturdayMinutes)}</td>
-                    <td>{formatHours(day.sundayMinutes)}</td>
-                    <td>{formatHours(day.holidayMinutes)}</td>
-                    <td className="group-start">{formatHours(day.surchargeMinutes)}</td>
-                    <td className="net">
-                      {formatHours(day.netMinutes + day.surchargeMinutes)}
-                    </td>
-                  </tr>
-                ),
-              )}
+              {days.map((day) => (
+                <tr
+                  key={day.date}
+                  className={rowClassName(
+                    day.date,
+                    day.hasOpenWorkSession ? 'open-day' : '',
+                  )}
+                  onClick={() => onSelectDate(day.date)}
+                >
+                  <td>
+                    {formatDateKey(day.date)}
+                    {day.hasOpenWorkSession && (
+                      <>
+                        {' '}
+                        <span
+                          className={`status-badge status-${day.hasOpenBreak ? 'ON_BREAK' : 'WORKING'}`}
+                        >
+                          {day.hasOpenBreak ? 'Pause' : 'läuft'}
+                        </span>
+                      </>
+                    )}
+                  </td>
+                  <td>{formatHours(day.workedMinutes)}</td>
+                  <td>{formatHours(day.breakMinutes)}</td>
+                  <td>{formatHours(day.automaticBreakMinutes)}</td>
+                  <td className="net">{formatHours(day.netMinutes)}</td>
+                  <td className="group-start">{formatHours(day.saturdayMinutes)}</td>
+                  <td>{formatHours(day.sundayMinutes)}</td>
+                  <td>{formatHours(day.holidayMinutes)}</td>
+                  <td className="group-start">{formatHours(day.surchargeMinutes)}</td>
+                  <td className="net">
+                    {formatHours(day.netMinutes + day.surchargeMinutes)}
+                  </td>
+                </tr>
+              ))}
             </tbody>
             <tfoot>
               <tr>
@@ -165,6 +257,45 @@ function DaySummary({
           </table>
         </div>
       )}
+
+      {days.some((day) => day.hasOpenWorkSession) && (
+        <p className="field-note">
+          Die laufende Schicht ist bis jetzt gerechnet, als würde jetzt
+          gegangen.
+        </p>
+      )}
+
+      {days
+        .filter(
+          (day) =>
+            day.hasOpenWorkSession && day.workedMinutes > FORGOTTEN_GEHEN_MINUTES,
+        )
+        .map((day) => (
+          <p key={day.date} className="warning">
+            {formatDateKey(day.date)}: Die Schicht läuft seit{' '}
+            {formatHours(day.workedMinutes)} Std. Wurde „Gehen“ vergessen? Dann
+            bitte über „Nachtragen“ nachholen.
+          </p>
+        ))}
+
+      {days
+        .filter((day) => day.netMinutes > MAXIMUM_DAILY_WORK_MINUTES)
+        .map((day) => (
+          <p key={day.date} className="warning">
+            {formatDateKey(day.date)}: {formatHours(day.netMinutes)} Std.
+            Arbeitszeit. Nach ArbZG §3 sind höchstens 10 Stunden am Tag erlaubt.
+          </p>
+        ))}
+
+      {days
+        .filter((day) => day.interruptionMinutes > 0)
+        .map((day) => (
+          <p key={day.date} className="field-note">
+            {formatDateKey(day.date)}: Die Unterbrechung von{' '}
+            {formatHours(day.interruptionMinutes)} Std. zwischen den Schichten
+            zählt als Ruhepause.
+          </p>
+        ))}
 
       {days
         .filter((day) => day.ignoredBreakMinutes > 0)

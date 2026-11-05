@@ -109,6 +109,22 @@ h2 {
   gap: 12px;
 }
 
+.summary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.summary-actions select {
+  width: auto;
+}
+
+/* Hinweise ohne Warnung in der Tagesübersicht, z. B. zur laufenden Schicht. */
+.card > .field-note {
+  margin: 0 0 12px;
+}
+
 /* ---------- Buttons ---------- */
 
 button {
@@ -169,16 +185,6 @@ button:disabled:hover {
   background: none;
   color: var(--color-primary);
   text-decoration: underline;
-}
-
-/* Unauffällige Nebenaktion, z. B. "Leeren" */
-.link-button.quiet {
-  color: var(--color-muted);
-  font-size: 13px;
-}
-
-.link-button.quiet:hover {
-  color: var(--color-danger);
 }
 
 .form-actions,
@@ -459,12 +465,9 @@ button:focus-visible {
   font-weight: bold;
 }
 
+/* Laufende Schicht: Werte bis jetzt, noch nicht endgültig. */
 .day-table .open-day td {
   color: var(--color-muted);
-}
-
-.day-table .open-day td:last-child {
-  text-align: left;
   font-style: italic;
 }
 

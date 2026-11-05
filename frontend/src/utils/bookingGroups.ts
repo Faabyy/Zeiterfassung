@@ -50,6 +50,23 @@ export function findBookingGroup(
   return pauseById.get(bookingId) ?? [booking]
 }
 
+// Buchungen der noch laufenden Schicht, leer wenn niemand eingestempelt ist.
+export function findOpenShift(bookings: Booking[]): Booking[] {
+  const lastBooking = bookings[bookings.length - 1]
+
+  if (!lastBooking || lastBooking.type === 'GEHEN') {
+    return []
+  }
+
+  let start = bookings.length - 1
+
+  while (start > 0 && bookings[start].type !== 'KOMMEN') {
+    start -= 1
+  }
+
+  return bookings.slice(start)
+}
+
 // Ordnet jede Buchung ihrem Arbeitstag zu (Datum der KOMMEN-Buchung ihrer
 // Schicht), wie in der Tagesübersicht. Erwartet eine sortierte Folge.
 export function filterBookingsByWorkDay(

@@ -90,13 +90,14 @@ export function parseTimeInput(input: string): string | null {
   return `${hours.padStart(2, '0')}:${minutes}`
 }
 
-// Kompakte Dauer für Tabellen: 510 -> "8:30", 0 -> "–".
-export function formatHours(totalMinutes: number): string {
-  if (totalMinutes === 0) {
-    return '–'
-  }
-
+// Dauer als Stunden und Minuten: 510 -> "8:30", 0 -> "0:00".
+export function formatDuration(totalMinutes: number): string {
   const hours = Math.floor(totalMinutes / 60)
   const minutes = String(totalMinutes % 60).padStart(2, '0')
   return `${hours}:${minutes}`
+}
+
+// Kompakte Dauer für Tabellen: 510 -> "8:30", 0 -> "–".
+export function formatHours(totalMinutes: number): string {
+  return totalMinutes === 0 ? '–' : formatDuration(totalMinutes)
 }

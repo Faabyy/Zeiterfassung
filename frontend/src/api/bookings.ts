@@ -153,7 +153,3 @@ export async function fetchBookingChanges(): Promise<BookingChange[]> {
     changedAt: change.changed_at,
   }))
 }
-
-export function clearBookingChanges(): Promise<{ deleted: number }> {
-  return request('/api/booking-changes', { method: 'DELETE' })
-}

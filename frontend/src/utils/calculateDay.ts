@@ -6,6 +6,7 @@ import {
   SUNDAY_SURCHARGE_RATE,
   splitMinutesBySurchargeRate,
 } from './surcharges'
+import { getCurrentBookingStatus } from './bookingStatus'
 import { diffInMinutes, toDateKey } from './timeUtils'
 
 // ArbZG §4: Ruhepausen zählen nur in Abschnitten von mindestens 15 Minuten.
@@ -14,11 +15,18 @@ export const MINIMUM_BREAK_BLOCK_MINUTES = 15
 // ArbZG §4: nicht länger als 6 Stunden am Stück ohne Ruhepause.
 export const MAXIMUM_WORK_BLOCK_MINUTES = 6 * 60
 
+// ArbZG §3: höchstens 10 Stunden Arbeitszeit am Tag.
+export const MAXIMUM_DAILY_WORK_MINUTES = 10 * 60
+
+// Ab dieser Dauer wurde "Gehen" vermutlich vergessen.
+export const FORGOTTEN_GEHEN_MINUTES = 12 * 60
+
 export type DayCalculation = {
   date: string // Arbeitstag = Datum der KOMMEN-Buchung (YYYY-MM-DD)
   workedMinutes: number
   breakMinutes: number
   ignoredBreakMinutes: number // Pausen unter 15 min, zählen als Arbeitszeit
+  interruptionMinutes: number // zwischen zwei Schichten am selben Tag
   requiredBreakMinutes: number // gesetzliche Pause zur Netto-Arbeitszeit
   automaticBreakMinutes: number
   deductedBreakMinutes: number
@@ -36,6 +44,8 @@ type DayTotals = {
   workedMinutes: number
   breakMinutes: number
   ignoredBreakMinutes: number
+  interruptionMinutes: number
+  lastShiftEnd: string | null
   minutesByRate: Map<number, number> // Zuschlagssatz -> Arbeitsminuten
   longestWorkBlockMinutes: number
   hasOpenWorkSession: boolean
@@ -81,6 +91,8 @@ function createEmptyTotals(): DayTotals {
     workedMinutes: 0,
     breakMinutes: 0,
     ignoredBreakMinutes: 0,
+    interruptionMinutes: 0,
+    lastShiftEnd: null,
     minutesByRate: new Map(),
     longestWorkBlockMinutes: 0,
     hasOpenWorkSession: false,
@@ -92,9 +104,12 @@ function finishDay(date: string, totals: DayTotals): DayCalculation {
   // Arbeitszeit ohne gebuchte Pausen; zu kurze Pausen zählen mit.
   const workMinutes = totals.workedMinutes - totals.breakMinutes
 
+  // Eine Unterbrechung zwischen zwei Schichten desselben Tages ist eine
+  // Ruhepause, wird aber nicht abgezogen: Sie liegt schon außerhalb der
+  // Bruttozeit.
   const automaticBreakMinutes = getAutomaticBreakMinutes(
     workMinutes,
-    totals.breakMinutes,
+    totals.breakMinutes + totals.interruptionMinutes,
   )
 
   const deductedBreakMinutes = totals.breakMinutes + automaticBreakMinutes
@@ -133,6 +148,7 @@ function finishDay(date: string, totals: DayTotals): DayCalculation {
     workedMinutes: totals.workedMinutes,
     breakMinutes: totals.breakMinutes,
     ignoredBreakMinutes: totals.ignoredBreakMinutes,
+    interruptionMinutes: totals.interruptionMinutes,
     requiredBreakMinutes,
     automaticBreakMinutes,
     deductedBreakMinutes,
@@ -151,7 +167,40 @@ function finishDay(date: string, totals: DayTotals): DayCalculation {
 // Eine Schicht wird vollständig dem Tag ihrer KOMMEN-Buchung zugeordnet,
 // auch wenn sie über Mitternacht geht. Zuschläge werden dagegen
 // minutengenau nach Kalendertag berechnet.
-export function calculateDays(bookings: Booking[]): DayCalculation[] {
+// Mit "now" wird eine laufende Schicht bis jetzt mitgerechnet (als ob jetzt
+// gegangen würde), sonst erst nach dem Gehen.
+export function calculateDays(
+  bookings: Booking[],
+  now?: string,
+): DayCalculation[] {
+  const days = calculateClosedDays(bookings)
+  const status = getCurrentBookingStatus(bookings)
+  const lastBooking = bookings[bookings.length - 1]
+
+  if (!now || status === 'OUT' || now <= lastBooking.timestamp) {
+    return days
+  }
+
+  const closing: Booking[] = [
+    ...(status === 'ON_BREAK'
+      ? [{ ...lastBooking, id: -1, type: 'PAUSE_ENDE' as const, timestamp: now }]
+      : []),
+    { ...lastBooking, id: -2, type: 'GEHEN', timestamp: now },
+  ]
+
+  // Werte bis jetzt, Kennzeichen der offenen Schicht wie ohne "now".
+  return calculateClosedDays([...bookings, ...closing]).map((day) => {
+    const openDay = days.find((candidate) => candidate.date === day.date)
+
+    return {
+      ...day,
+      hasOpenWorkSession: openDay?.hasOpenWorkSession ?? false,
+      hasOpenBreak: openDay?.hasOpenBreak ?? false,
+    }
+  })
+}
+
+function calculateClosedDays(bookings: Booking[]): DayCalculation[] {
   const totalsByDate = new Map<string, DayTotals>()
 
   let currentDate: string | null = null
@@ -174,6 +223,16 @@ export function calculateDays(bookings: Booking[]): DayCalculation[] {
 
       if (!totalsByDate.has(currentDate)) {
         totalsByDate.set(currentDate, createEmptyTotals())
+      }
+
+      const totals = totalsByDate.get(currentDate)!
+
+      if (totals.lastShiftEnd) {
+        const gapMinutes = diffInMinutes(totals.lastShiftEnd, booking.timestamp)
+
+        if (gapMinutes >= MINIMUM_BREAK_BLOCK_MINUTES) {
+          totals.interruptionMinutes += gapMinutes
+        }
       }
     }
 
@@ -213,6 +272,7 @@ export function calculateDays(bookings: Booking[]): DayCalculation[] {
       const totals = totalsByDate.get(currentDate)!
 
       totals.workedMinutes += diffInMinutes(openWorkStart, booking.timestamp)
+      totals.lastShiftEnd = booking.timestamp
       totals.breakMinutes += pendingBreakMinutes
       totals.ignoredBreakMinutes += pendingIgnoredBreakMinutes
 

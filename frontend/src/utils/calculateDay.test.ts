@@ -9,6 +9,7 @@ function bookingsOf(...entries: Array<[BookingType, string]>): Booking[] {
     type,
     timestamp,
     source: 'STAMP',
+    corrected: false,
   }))
 }
 
@@ -376,5 +377,79 @@ describe('Tage und offene Buchungen', () => {
 
   it('liefert für keine Buchungen keine Tage', () => {
     expect(calculateDays([])).toEqual([])
+  })
+})
+
+describe('Mehrere Schichten an einem Tag', () => {
+  it('rechnet die Unterbrechung als Ruhepause, ohne sie abzuziehen', () => {
+    const day = calculateSingleDay(
+      ['KOMMEN', '2026-07-13T08:00'],
+      ['GEHEN', '2026-07-13T12:00'],
+      ['KOMMEN', '2026-07-13T13:00'],
+      ['GEHEN', '2026-07-13T17:00'],
+    )
+
+    expect(day).toMatchObject({
+      workedMinutes: 480,
+      breakMinutes: 0,
+      interruptionMinutes: 60,
+      automaticBreakMinutes: 0,
+      netMinutes: 480,
+    })
+  })
+
+  it('zählt Unterbrechungen unter 15 Minuten nicht als Pause', () => {
+    const day = calculateSingleDay(
+      ['KOMMEN', '2026-07-13T08:00'],
+      ['GEHEN', '2026-07-13T12:00'],
+      ['KOMMEN', '2026-07-13T12:10'],
+      ['GEHEN', '2026-07-13T16:10'],
+    )
+
+    expect(day).toMatchObject({
+      interruptionMinutes: 0,
+      automaticBreakMinutes: 30,
+      netMinutes: 450,
+    })
+  })
+})
+
+describe('Laufende Schicht', () => {
+  it('rechnet ohne "now" erst nach dem Gehen', () => {
+    const day = calculateSingleDay(['KOMMEN', '2026-07-13T08:00'])
+
+    expect(day.workedMinutes).toBe(0)
+  })
+
+  it('rechnet mit "now" bis jetzt und bleibt als offen markiert', () => {
+    const [day] = calculateDays(
+      bookingsOf(['KOMMEN', '2026-07-13T08:00']),
+      '2026-07-13T15:00',
+    )
+
+    expect(day).toMatchObject({
+      workedMinutes: 420,
+      automaticBreakMinutes: 30,
+      netMinutes: 390,
+      hasOpenWorkSession: true,
+      hasOpenBreak: false,
+    })
+  })
+
+  it('beendet eine laufende Pause zum aktuellen Zeitpunkt', () => {
+    const [day] = calculateDays(
+      bookingsOf(
+        ['KOMMEN', '2026-07-13T08:00'],
+        ['PAUSE_START', '2026-07-13T12:00'],
+      ),
+      '2026-07-13T12:30',
+    )
+
+    expect(day).toMatchObject({
+      workedMinutes: 270,
+      breakMinutes: 30,
+      netMinutes: 240,
+      hasOpenBreak: true,
+    })
   })
 })

@@ -8,9 +8,10 @@ export type Booking = {
   type: BookingType
   timestamp: string // ISO 8601, z. B. "2026-07-18T23:45"
   source: BookingSource
+  corrected: boolean // nachträglich über "Bearbeiten" geändert
 }
 
-export type NewBooking = Omit<Booking, 'id' | 'source'>
+export type NewBooking = Pick<Booking, 'type' | 'timestamp'>
 
 export type BookingChange = {
   id: number

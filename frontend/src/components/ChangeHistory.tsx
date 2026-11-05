@@ -4,7 +4,6 @@ import { formatTimestamp } from '../utils/timeUtils'
 
 type ChangeHistoryProps = {
   changes: BookingChange[]
-  onClear: () => void
 }
 
 const ACTION_LABELS: Record<BookingChange['action'], string> = {
@@ -25,18 +24,12 @@ function describeBooking(type: BookingType | null, timestamp: string | null) {
     : ''
 }
 
-function ChangeHistory({ changes, onClear }: ChangeHistoryProps) {
+// Die Historie lässt sich nicht leeren, damit Korrekturen nachvollziehbar
+// bleiben.
+function ChangeHistory({ changes }: ChangeHistoryProps) {
   return (
     <div className="card">
-      <div className="card-header">
-        <h2>Änderungshistorie</h2>
-
-        {changes.length > 0 && (
-          <button type="button" className="link-button quiet" onClick={onClear}>
-            Leeren
-          </button>
-        )}
-      </div>
+      <h2>Änderungshistorie</h2>
 
       {changes.length === 0 ? (
         <p>Noch keine Änderungen vorhanden.</p>
